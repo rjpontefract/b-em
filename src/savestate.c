@@ -75,7 +75,11 @@ void savestate_load(const char *name)
             unsigned char magic[8];
             if (fread(magic, 8, 1, fp) == 1 && memcmp(magic, "BEMSNAP", 7) == 0) {
                 int vers = magic[7];
+#ifdef BUILD_TAPE_INCOMPATIBLE_NEW_SAVE_STATES
+                if (vers >= '1' && vers <= '4') { /* TOHv4, v4-rc8 (bugfix) */
+#else
                 if (vers >= '1' && vers <= '3') {
+#endif
                     char *name_copy = strdup(name);
                     if (name_copy) {
                         if (savestate_name)
@@ -98,14 +102,24 @@ void savestate_load(const char *name)
     }
 }
 
+#ifdef BUILD_TAPE_INCOMPATIBLE_NEW_SAVE_STATES
+static void sysacia_savestate_TOHv4(FILE *f) {
+    acia_savestate_BEMSNAP4(&sysacia, f);
+}
+static void sysacia_loadstate_TOHv4(FILE *f) {
+    acia_loadstate_BEMSNAP4(&sysacia, f);
+}
+#else
 static void sysacia_savestate(FILE *f) {
     acia_savestate(&sysacia, f);
 }
+#endif
 
+/* this persists because we may need to load legacy BEMSNAP3 */
 static void sysacia_loadstate(FILE *f) {
+    acia_init(&sysacia);
     acia_loadstate(&sysacia, f);
 }
-
 static void save_tail(FILE *fp, int key, long start, long end, long size)
 {
     fseek(fp, start, SEEK_SET);
@@ -193,7 +207,12 @@ void savestate_zwrite(ZFILE *zfp, void *src, size_t size)
 void savestate_dosave(void)
 {
     FILE *fp = savestate_fp;
+    // fwrite("BEMSNAP3", 8,1, fp);
+#ifdef BUILD_TAPE_INCOMPATIBLE_NEW_SAVE_STATES
+    fwrite("BEMSNAP4", 8,1, fp);
+#else
     fwrite("BEMSNAP3", 8,1, fp);
+#endif
     save_sect(fp, 'm', model_savestate);
     save_sect(fp, '6', m6502_savestate);
     save_zlib(fp, 'M', mem_savezlib);
@@ -204,8 +223,13 @@ void savestate_dosave(void)
     save_sect(fp, 'v', video_savestate);
     save_sect(fp, 's', sn_savestate);
     save_sect(fp, 'A', adc_savestate);
-    save_sect(fp, 'a', sysacia_savestate);
-    save_sect(fp, 'r', serial_savestate);
+#ifdef BUILD_TAPE_INCOMPATIBLE_NEW_SAVE_STATES
+    save_sect(fp, '@', sysacia_savestate_TOHv4); /* BEMSNAP4 */
+    save_sect(fp, '$', serial_savestate_BEMSNAP4); /* BEMSNAP4 */
+#else
+    save_sect(fp, 'a', sysacia_savestate);       /* BEMSNAP3 */
+    save_sect(fp, 'r', serial_savestate);        /* BEMSNAP3 */
+#endif
     save_sect(fp, 'F', vdfs_savestate);
     save_sect(fp, '5', music5000_savestate);
     save_sect(fp, 'p', paula_savestate);
@@ -324,11 +348,19 @@ static void load_section(FILE *fp, int key, long size)
         case 'A':
             adc_loadstate(fp);
             break;
-        case 'a':
+        case 'a': /* BEMSNAP3 */
             sysacia_loadstate(fp);
             break;
+#ifdef BUILD_TAPE_INCOMPATIBLE_NEW_SAVE_STATES
+        case '@': /* BEMSNAP4 */
+            sysacia_loadstate_TOHv4(fp);
+            break;
+        case '$': /* BEMSNAP4 */
+            serial_loadstate_BEMSNAP4(fp);
+            break;
+#endif
         case 'r':
-            serial_loadstate(fp);
+            serial_loadstate(fp); /* BEMSNAP3 */
             break;
         case 'F':
             vdfs_loadstate(fp);
@@ -390,6 +422,27 @@ static void load_state_three(FILE *fp)
     }
 }
 
+#ifdef BUILD_TAPE_INCOMPATIBLE_NEW_SAVE_STATES /* TOHv4 */
+static void load_state_four(FILE *fp)
+{
+    unsigned char hdr[3];
+
+    while (fread(hdr, sizeof hdr, 1, fp) == 1) {
+        int key = hdr[0];
+        long size = hdr[1] | (hdr[2] << 8);
+        if (key & 0x80) {
+            if (fread(hdr, 2, 1, fp) != 1) {
+                log_error("savestate: unexpected EOF on file %s", savestate_name);
+                return;
+            }
+            size |= (hdr[0] << 16) | (hdr[1] << 24);
+            key &= 0x7f;
+        }
+        load_section(fp, key, size);
+    }
+}
+#endif
+
 void savestate_doload(void)
 {
     FILE *fp = savestate_fp;
@@ -403,6 +456,11 @@ void savestate_doload(void)
         case '3':
             load_state_three(fp);
             break;
+#ifdef BUILD_TAPE_INCOMPATIBLE_NEW_SAVE_STATES  /* TOHv4 */
+        case '4':
+            load_state_four(fp);
+            break;
+#endif
     }
     if (ferror(fp))
         log_error("savestate: state not fully restored from V%c file '%s': %s", savestate_wantload, savestate_name, strerror(errno));

@@ -1,4 +1,4 @@
-#define _DEBUG
+//#define _DEBUG
 #include "b-em.h"
 #include "textsave.h"
 #include "mem.h"

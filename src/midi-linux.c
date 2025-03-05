@@ -211,6 +211,8 @@ static void m4000_seq_init(void) {
 static void m2000_seq_init(midi_dev_t *midi, const char *pname) {
     int port;
 
+    midi->alsa_seq_port = -1; /* TOHv4 */
+
     if (midi->alsa_seq_enabled) {
         port = snd_seq_create_simple_port(midi_seq, pname, SND_SEQ_PORT_CAP_READ|SND_SEQ_PORT_CAP_SUBS_READ, SND_SEQ_PORT_TYPE_SOFTWARE);
         if (port < 0)
@@ -256,6 +258,31 @@ static inline void midi_alsa_seq_init(void) {
     }
 }
 
+
+#ifdef HAVE_ALSA_ASOUNDLIB_H
+static void midi_alsa_seq_close(void) {
+    if (NULL == midi_seq) { return; }
+    if (midi_music2000_out1.alsa_seq_enabled) {
+        if (midi_music2000_out1.alsa_seq_port > -1) {
+            snd_seq_delete_simple_port(midi_seq, midi_music2000_out1.alsa_seq_port);
+        }
+    }
+    if (midi_music2000_out2.alsa_seq_enabled) {
+        if (midi_music2000_out2.alsa_seq_port > -1) {
+            snd_seq_delete_simple_port(midi_seq, midi_music2000_out2.alsa_seq_port);
+        }
+    }
+    if (midi_music2000_out3.alsa_seq_enabled) {
+        if (midi_music2000_out3.alsa_seq_port > -1) {
+            snd_seq_delete_simple_port(midi_seq, midi_music2000_out3.alsa_seq_port);
+        }
+    }
+    if (NULL != midi_seq) { snd_seq_close(midi_seq); }
+    midi_seq = NULL;
+}
+#endif
+
+
 static inline void alsa_seq_ctrl(snd_seq_event_t *ev, uint8_t *buffer) {
     ev->data.control.channel = buffer[0] & 0x0f;
     ev->data.control.param = buffer[1];
@@ -266,7 +293,7 @@ static void midi_alsa_seq_send_msg(midi_dev_t *midi, uint8_t *buffer, size_t siz
     snd_seq_event_t ev;
     int res;
 
-    if (midi->alsa_seq_enabled && midi->alsa_seq_port) {
+    if (midi->alsa_seq_enabled && (midi->alsa_seq_port > -1)) {
         snd_seq_ev_clear(&ev);
 
         switch(buffer[0] >> 4) {
@@ -498,6 +525,9 @@ void midi_init(void) {
 
 void midi_close(void) {
     midi_jack_close();
+#ifdef HAVE_ALSA_ASOUNDLIB_H
+    midi_alsa_seq_close();
+#endif
 }
 
 void midi_load_config(void) {

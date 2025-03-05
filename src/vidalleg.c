@@ -1,6 +1,6 @@
 /*B-em v2.2 by Tom Walker
   Allegro video code*/
-#define _DEBUG
+//#define _DEBUG
 #include <allegro5/allegro_primitives.h>
 #include "b-em.h"
 #include "led.h"
@@ -563,7 +563,7 @@ static void render_leds(void)
         float w = al_get_bitmap_width(led_bitmap);
         float h = al_get_bitmap_height(led_bitmap);
         if (vid_ledvisibility == LED_VIS_ALWAYS || (vid_ledvisibility == LED_VIS_TRANSIENT && led_any_transient_led_on())) {
-            log_debug("led: drawing non-faded bitmap");
+            //log_debug("led: drawing non-faded bitmap");
             al_draw_scaled_bitmap(led_bitmap, 0, 0, w, h, (winsizex-w)/2, winsizey-h, w, h, 0);
         }
         else {
@@ -595,7 +595,12 @@ void video_doblit(bool non_ttx, uint8_t vtotal)
         save_screenshot();
 
     ++framesrun;
-    if (++fskipcount >= ((motor && fasttape) ? 5 : vid_fskipmax)) {
+#ifdef BUILD_TAPE_NO_FASTTAPE_VIDEO_HACKS
+    if (++fskipcount >= vid_fskipmax) { /* TOHv3.2 */
+#else
+    /* (this was the original code) */
+    if (++fskipcount >= ((tape_state.ula_motor && tape_vars.overclock) ? 5 : vid_fskipmax)) {
+#endif
         if (fullscreen_pending) {
             ALLEGRO_DISPLAY *display = al_get_current_display();
             int newsizex = al_get_display_width(display);

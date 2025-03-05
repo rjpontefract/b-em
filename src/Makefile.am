@@ -18,11 +18,11 @@ amrefresh:
 b_em_CFLAGS = $(allegro_CFLAGS) -DBEM -DINCLUDE_DEBUGGER -DUSE_MEMORY_POINTER -DMODET -DMODE32 -DBEEBEM -DM68K
 
 # workaround for Win32 Allegro, which has `allegro-config' missing
-if OS_WIN
-b_em_LDADD = -lallegro_audio -lallegro_acodec -lallegro_primitives -lallegro_dialog -lallegro_image -lallegro_font -lallegro -lz -lm
-else
+#if OS_WIN
+#b_em_LDADD = -lallegro_audio -lallegro_acodec -lallegro_primitives -lallegro_dialog -lallegro_image -lallegro_font -lallegro -lz -lm
+#else
 b_em_LDADD = -lallegro_audio -lallegro_acodec -lallegro_primitives -lallegro_dialog -lallegro_image -lallegro_font -lallegro_main -lallegro -lz -lm -lpthread
-endif
+#endif
 
 b_em_SOURCES = \
 	6502.c \
@@ -105,6 +105,7 @@ b_em_SOURCES = \
 	sysacia.c \
 	sysvia.c \
 	tape.c \
+	tibet.c \
 	tapecat-allegro.c \
 	tapenoise.c \
     pdp11/pdp11.c \

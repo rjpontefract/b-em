@@ -1,4 +1,4 @@
-#define _DEBUG
+//#define _DEBUG
 /*B-em v2.2 by Tom Walker
   Internal SN sound chip emulation*/
 
@@ -16,6 +16,7 @@ bool sound_internal = false, sound_beebsid = false, sound_dac = false;
 bool sound_ddnoise = false, sound_tape = false;
 bool sound_music5000 = false, sound_filter = false;
 bool sound_paula = false;
+bool sound_tape_relay = false; /* TOHv2 */
 
 static ALLEGRO_VOICE *voice;
 static ALLEGRO_MIXER *mixer;

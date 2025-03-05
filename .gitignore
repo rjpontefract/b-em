@@ -60,3 +60,4 @@ src/b-em.aps
 *.bak
 build-w32/
 build-w64/
+*.sca
