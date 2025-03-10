@@ -595,7 +595,12 @@ void video_doblit(bool non_ttx, uint8_t vtotal)
         save_screenshot();
 
     ++framesrun;
-    if (++fskipcount >= ((motor && fasttape) ? 5 : vid_fskipmax)) {
+#ifdef BUILD_TAPE_NO_FASTTAPE_VIDEO_HACKS
+    if (++fskipcount >= vid_fskipmax) { /* TOHv3.2 */
+#else
+    /* (this was the original code) */
+    if (++fskipcount >= ((tape_state.ula_motor && tape_vars.overclock) ? 5 : vid_fskipmax)) {
+#endif
         if (fullscreen_pending) {
             ALLEGRO_DISPLAY *display = al_get_current_display();
             int newsizex = al_get_display_width(display);

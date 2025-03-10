@@ -105,6 +105,7 @@ b_em_SOURCES = \
 	sysacia.c \
 	sysvia.c \
 	tape.c \
+	tibet.c \
 	tapecat-allegro.c \
 	tapenoise.c \
     pdp11/pdp11.c \

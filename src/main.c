@@ -66,6 +66,10 @@
 #include "z80.h"
 #include "sprow.h"
 
+#ifndef WIN32
+#include <unistd.h>
+#endif
+
 #undef printf
 
 bool quitting = false;
@@ -78,6 +82,9 @@ int joybutton[4];
 float joyaxes[4];
 int emuspeed = 4;
 bool tricky_sega_adapter = false;
+/* TOHv3: although C exit code is an int, Unix shells don't safely allow
+   you to use values > 125, so this is limited to a signed 8-bit value >:( */
+int8_t shutdown_exit_code = SHUTDOWN_OK;
 
 static ALLEGRO_TIMER *timer;
 ALLEGRO_EVENT_QUEUE *queue;
@@ -145,8 +152,8 @@ static const char helptext[] =
     "-disc disc.ssd  - load disc.ssd into drives :0/:2\n"
     "-disc1 disc.ssd - load disc.ssd into drives :1/:3\n"
     "-autoboot       - boot disc in drive :0\n"
-    "-tape tape.uef  - load tape.uef\n"
-    "-fasttape       - set tape speed to fast\n"
+    "-tape tape.uef  - load tape.uef (or .csw/.tibet/.tibetz)\n"
+    "-fasttape       - enable tape overclocking\n"
     "-Fx             - set maximum video frames skipped\n"
     "-s              - scanlines display mode\n"
     "-i              - interlace display mode\n"
@@ -160,7 +167,19 @@ static const char helptext[] =
     "-paste string   - paste string in as if typed (via OS)\n"
     "-pastek string  - paste string in as if typed (via KB)\n"
     "-vroot host-dir - set the VDFS root\n"
-    "-vdir guest-dir - set the initial (boot) dir in VDFS\n\n";
+    "-vdir guest-dir - set the initial (boot) dir in VDFS\n"
+    "-rs423file file - write RS423 output to file\n"
+    "-tapetest <n>   - bits: 1=quit @ EOF | 2=quit @ err | 4=cat @ boot |\n"             /* TOHv3, v4   */
+    "                        8=cat @ end  | 16=slow startup\n"                           /* TOHv4.1 */
+    "-record         - begin recording to tape at B-Em startup\n"                        /* TOHv3   */
+    "-tapesave file  - save tape copy on exit (format set by extension)\n"               /* TOHv3   */
+    "-tapeskip       - skip silence and leader when loading tapes (faster)\n"            /* TOHv3.2 */
+    "-tape117        - when saving UEF, emit baud chunk &117 before every block\n"       /* TOHv3.2 */
+    "-tape112        - when saving UEF, use chunk &112 rather than &116 for silence\n"   /* TOHv3.2 */
+    "-tapeno0        - when appending to loaded UEF, do not emit origin chunk &0\n"      /* TOHv3.2 */
+    "-expire <n>     - quit, with predictable exit code, after <n> emulated seconds\n"   /* TOHv3.3 */
+    "-tapenopbp      - do not filter out phantom blocks on tape load\n"
+    "\n";
 
 static double main_calc_timer(int speed)
 {
@@ -227,11 +246,26 @@ static void main_load_speeds(void)
 
 void main_init(int argc, char *argv[])
 {
+
+    /* TOHv3 */
+    int tapetestnext = 0, tapesavenext = 0;
+    uint8_t tapesave_dup, tapesave_do_compress, tapesave_filetype_bits;
+    int e; /* TOHv3.3 */
+
     int tapenext = 0, discnext = 0, execnext = 0, vdfsnext = 0, pastenext = 0;
+    int rs423filenext = 0; /* TOHv4 */
+    int expirenext = 0; /* TOHv3.3 */
     ALLEGRO_DISPLAY *display;
     ALLEGRO_PATH *path;
     const char *ext, *exec_fn = NULL;
     const char *vroot = NULL, *vdir = NULL;
+    const char *rs423_fn = NULL; /* TOHv4 */
+    
+    e = TAPE_E_OK; /* TOHv3.3 */
+
+    /* TOHv3: */
+    shutdown_exit_code = SHUTDOWN_OK;
+    tape_vars.testing_mode  = 0;
 
     if (!al_init()) {
         fputs("Failed to initialise Allegro!\n", stderr);
@@ -253,7 +287,16 @@ void main_init(int argc, char *argv[])
     main_load_speeds();
     model_loadcfg();
 
+    /* TOHv3 */
+    acia_init(&sysacia); /* TOHv3.2 */
+    tape_init(&tape_state, &tape_vars);
+    tapesave_filetype_bits = TAPE_FILETYPE_BITS_NONE;
+    tapesave_dup = 0;
+    tapesave_do_compress = 0;
+
     for (int c = 1; c < argc; c++) {
+        size_t len; /* TOHv3 */
+        uint8_t fail;
         if (!strcasecmp(argv[c], "--help") || !strcmp(argv[c], "-?") || !strcasecmp(argv[c], "-h")) {
             fwrite(helptext, sizeof helptext-1, 1, stdout);
             exit(1);
@@ -267,8 +310,28 @@ void main_init(int argc, char *argv[])
         else if (!strcasecmp(argv[c], "-fullscreen"))
             fullscreen = 1;
 	// lovebug end
+        else if (!strcasecmp(argv[c], "-rs423file"))
+            rs423filenext = 1;
+        else if (!strcasecmp(argv[c], "-tapesave"))
+            tapesavenext = 1;
+        else if (!strcasecmp(argv[c], "-tapetest")) /* TOHv3: must come before -tape */
+            tapetestnext = 1;
+        else if (!strcasecmp(argv[c], "-tapeskip")) /* TOHv3.2: must come before -tape */
+            tape_vars.strip_silence_and_leader = 1;
+        else if (!strcasecmp(argv[c], "-tape117"))  /* TOHv3.2: must come before -tape */
+            tape_vars.save_always_117 = 1;
+        else if (!strcasecmp(argv[c], "-tape112"))  /* TOHv3.2: must come before -tape */
+            tape_vars.save_prefer_112 = 1;
+        else if (!strcasecmp(argv[c], "-tapeno0"))  /* TOHv3.2: must come before -tape */
+            tape_vars.save_do_not_generate_origin_on_append = 1;
+        else if (!strcasecmp(argv[c], "-tapenopbp")) /* TOHv3.2: must come before -tape */
+            tape_vars.disable_phantom_block_protection = 1;
         else if (!strcasecmp(argv[c], "-tape"))
-            tapenext = 2;
+            tapenext = 1;
+        else if (!strcasecmp(argv[c], "-record")) /* TOHv3 */
+            e = tape_set_record_activated(&tape_state, &tape_vars, NULL, 1);
+        else if (!strcasecmp(argv[c], "-expire")) /* TOHv3.3, TOHv4 */
+            expirenext = 1;
         else if (!strcasecmp(argv[c], "-disc") || !strcasecmp(argv[c], "-disk"))
             discnext = 1;
         else if (!strcasecmp(argv[c], "-disc1"))
@@ -278,7 +341,7 @@ void main_init(int argc, char *argv[])
         else if (argv[c][0] == '-' && (argv[c][1] == 't' || argv[c][1] == 'T'))
             sscanf(&argv[c][2], "%i", &curtube);
         else if (!strcasecmp(argv[c], "-fasttape"))
-            fasttape = true;
+            tape_vars.overclock = true;
         else if (!strcasecmp(argv[c], "-autoboot"))
             autoboot = 150;
         else if (argv[c][0] == '-' && (argv[c][1] == 'f' || argv[c][1]=='F')) {
@@ -306,12 +369,93 @@ void main_init(int argc, char *argv[])
             vdfsnext = 2;
         else if (!strcasecmp(argv[c], "-paste"))
             pastenext = 1;
+        else if (expirenext) { /* TOHv3.3 */
+            expirenext = 0;
+#define OSP 15625 /* "otherstuff ticks" per second (see 6502.c) */
+            tape_vars.testing_expire_ticks = OSP * ((int64_t)atoi(argv[c]));
+            if (    (tape_vars.testing_expire_ticks < (1    * ((int64_t)OSP)))
+                 || (tape_vars.testing_expire_ticks > (2000 * ((int64_t)OSP)))) {
+                fprintf(stderr,
+                        "\"-expire\" value was illegal: %s\n",
+                        argv[c]);
+                exit(1);
+            }
+        } else if (tapetestnext) { /* TOHv3 */
+            tape_vars.testing_mode = 0x7f & atoi(argv[c]);
+            tape_vars.disable_debug_memview = 1; /* TOHv4: prevent slew of race conditions on mem view window */
+            tapetestnext = 0;
+            /* TOHv4-rc4: now permit -tapetest 0
+             * this suppresses mem view window but doesn't do anything else */
+            if (/*(0 == tape_vars.testing_mode) ||*/ (TAPE_TEST_BAD_MASK & tape_vars.testing_mode)) {
+                fprintf(stderr,
+                        "\"-tapetest\" value was illegal: %u\n",
+                        tape_vars.testing_mode);
+                exit(1);
+            }
+        } else if (tapesavenext) { /* TOHv3 */
+
+            if (tapesave_dup) {
+                fprintf(stderr, "\"-tapesave\" option specified multiple times!\n");
+                exit(1);
+            }
+
+            tapesave_dup = 1;
+            fail = 0;
+
+            /* examine final N characters */
+
+            len = strlen(argv[c]);
+            if (len < 5) {
+                fail = 1;
+            } else if (0 == strcasecmp(argv[c] + (len - 4), ".uef")) {    /* compress UEFs by default */
+                tapesave_filetype_bits = TAPE_FILETYPE_BITS_UEF;
+                tapesave_do_compress = 1;
+            } else if (0 == strcasecmp(argv[c] + (len - 4), ".csw")) {    /* compress CSWs by default */
+                tapesave_filetype_bits = TAPE_FILETYPE_BITS_CSW;
+                tapesave_do_compress = 1;
+            }
+
+            if ( ( ! fail ) && (TAPE_FILETYPE_BITS_NONE == tapesave_filetype_bits ) ) {
+                if (len < 7) {
+                    fail = 1;
+                } else if (0 == strcasecmp(argv[c] + (len - 6), ".tibet")) {
+                    tapesave_filetype_bits = TAPE_FILETYPE_BITS_TIBET;
+                }
+            }
+
+            if ( ( ! fail ) && (TAPE_FILETYPE_BITS_NONE == tapesave_filetype_bits ) ) {
+                if (len < 8) {
+                    fail = 1;
+                } else if (0 == strcasecmp(argv[c] + (len - 7), ".unzuef")) { /* extension disables compression */
+                    tapesave_filetype_bits = TAPE_FILETYPE_BITS_UEF;
+                } else if (0 == strcasecmp(argv[c] + (len - 7), ".unzcsw")) { /* extension disables compression */
+                    tapesave_filetype_bits = TAPE_FILETYPE_BITS_CSW;
+                } else if (0 == strcasecmp(argv[c] + (len - 7), ".tibetz")) {
+                    tapesave_filetype_bits = TAPE_FILETYPE_BITS_TIBET;
+                    tapesave_do_compress = 1;
+                }
+            }
+
+            if (fail) {
+                fprintf(stderr, "\"-tapesave\" filename was too short: %s\n", argv[c]);
+                exit(1);
+            } else if (TAPE_FILETYPE_BITS_NONE == tapesave_filetype_bits) {
+                fprintf(stderr, "\"-tapesave\": unrecognised filetype: %s\n", argv[c]);
+            } else {
+                tape_vars.quitsave_config.filename      = argv[c];
+                tape_vars.quitsave_config.filetype_bits = tapesave_filetype_bits;
+                tape_vars.quitsave_config.do_compress   = tapesave_do_compress;
+            }
+
+            tapesavenext = 0;
+
+        }
         else if (!strcasecmp(argv[c], "-pastek"))
             pastenext = 2;
         else if (tapenext) {
-            if (tape_fn)
-                al_destroy_path(tape_fn);
-            tape_fn = al_create_path(argv[c]);
+            if (tape_vars.load_filename)
+                al_destroy_path(tape_vars.load_filename);
+            tape_vars.load_filename = al_create_path(argv[c]);
         }
         else if (discnext) {
             if (discfns[discnext-1])
@@ -332,15 +476,22 @@ void main_init(int argc, char *argv[])
         }
         else if (pastenext)
             debug_paste(argv[c], pastenext == 2 ? key_paste_start : os_paste_start);
-        else {
+        else if (rs423filenext) {
+            rs423_fn = argv[c];
+            rs423filenext = 0;
+        } else {
             path = al_create_path(argv[c]);
             ext = al_get_path_extension(path);
             if (ext && !strcasecmp(ext, ".snp"))
                 savestate_load(argv[c]);
-            else if (ext && (!strcasecmp(ext, ".uef") || !strcasecmp(ext, ".csw"))) {
-                if (tape_fn)
-                    al_destroy_path(tape_fn);
-                tape_fn = path;
+            else if (ext &&
+                      (    ! strcasecmp(ext, ".uef") /* TOHv3: +TIBET */
+                        || ! strcasecmp(ext, ".csw")
+                        || ! strcasecmp(ext, ".tibet")
+                        || ! strcasecmp(ext, ".tibetz") ) ) {
+                if (tape_vars.load_filename)
+                    al_destroy_path(tape_vars.load_filename);
+                tape_vars.load_filename = path;
                 tapenext = 0;
             }
             else {
@@ -351,9 +502,20 @@ void main_init(int argc, char *argv[])
                 autoboot = 150;
             }
         }
-        if (tapenext) tapenext--;
-    }
 
+        if (tapenext) tapenext--;
+        
+        if (TAPE_E_OK != e) { break; }
+
+    }
+    
+    if (TAPE_E_OK != e) {
+        log_warn("main: command-line error (code %d)", e); /* TOHv4-rc3 */
+        shutdown_exit_code = SHUTDOWN_STARTUP_FAILURE;     /* TOHv4-rc3 */
+      /* FIXME (TOHv3.3): We would prefer to be able to return a failure
+         code from main_init(). There are loads of ways it might fail. */
+        return;
+    }
     display = video_init();
     mode7_makechars();
     al_init_image_addon();
@@ -413,6 +575,7 @@ void main_init(int argc, char *argv[])
         log_fatal("main: unable to create timer");
         exit(1);
     }
+
     al_register_event_source(queue, al_get_timer_event_source(timer));
     al_init_user_event_source(&evsrc);
     al_register_event_source(queue, &evsrc);
@@ -429,7 +592,9 @@ void main_init(int argc, char *argv[])
     else
         disc_load(0, discfns[0]);
     disc_load(1, discfns[1]);
-    tape_load(tape_fn);
+    if (tape_vars.load_filename != NULL) {
+        tape_load(tape_vars.load_filename);
+    }
     if (mmccard_fn)
         mmccard_load(mmccard_fn);
     if (defaultwriteprot)
@@ -439,11 +604,35 @@ void main_init(int argc, char *argv[])
     if (discfns[1])
         gui_set_disc_wprot(1, writeprot[1]);
     main_setspeed(emuspeed);
-    debug_start(exec_fn);
+    debug_start(exec_fn, ! tape_vars.disable_debug_memview);
     // lovebug
     if (fullscreen)
         video_enterfullscreen();
     // lovebug end
+
+    /* TOHv4.1: mitigate Allegro crash problems under
+     * certain test environments (macOS) by offering a means
+     * of delaying startup */
+    if (tape_vars.testing_mode & TAPE_TEST_SLOW_STARTUP) {
+#ifdef WIN32
+        Sleep(2000);
+#else
+        sleep(2);
+#endif
+    }
+
+    /* TOHv3: if tape testing mode is enabled, do a
+       full catalogue of the tape on startup: */
+    if (tape_vars.testing_mode & TAPE_TEST_CAT_ON_STARTUP) {
+        findfilenames_new(&tape_state,
+                          0,  /* 0 = silent; no UI window: */
+                          ! tape_vars.disable_phantom_block_protection);
+    }
+    if (rs423_fn != NULL) { /* TOHv4: for -rs423file */
+        sysacia_rec_start(rs423_fn);
+    }
+
+
 }
 
 void main_restart()
@@ -565,7 +754,8 @@ static void main_timer(ALLEGRO_EVENT *event)
             ddnoise_headdown();
 
         if (tapeledcount) {
-            if (--tapeledcount == 0 && !motor) {
+            /* TOHv3.3: state, not vars */
+            if ( --tapeledcount == 0 && ! tape_state.ula_motor ) {
                 log_debug("main: delayed cassette motor LED off");
                 led_update(LED_CASSETTE_MOTOR, 0, 0);
             }
@@ -625,7 +815,12 @@ void main_run()
     ALLEGRO_EVENT event;
 
     log_debug("main: about to start timer");
-    al_start_timer(timer);
+    if (NULL == timer) { /* TOHv3.3: sanity check */
+        log_warn("BUG: cannot start a NULL timer!\n");
+        quitting = 1;
+    } else {
+        al_start_timer(timer);
+    }
 
     log_debug("main: entering main loop");
     while (!quitting) {
@@ -695,6 +890,13 @@ void main_run()
                     main_resume();
         }
     }
+
+    if (tape_vars.testing_mode & TAPE_TEST_CAT_ON_SHUTDOWN) { /* TOHv4 */
+        findfilenames_new(&tape_state,
+                          0,  /* 0 = silent; no UI window: */
+                          ! tape_vars.disable_phantom_block_protection);
+    }
+
     log_debug("main: end loop");
 }
 
@@ -702,6 +904,8 @@ void main_close()
 {
     gui_tapecat_close();
     gui_keydefine_close();
+    
+    sysacia_rec_stop(); /* TOHv4 */
 
     debug_kill();
 
@@ -710,8 +914,14 @@ void main_close()
 
     midi_close();
     mem_close();
-    uef_close();
-    csw_close();
+    /* TOHv3 */
+
+    tape_save_on_shutdown(&(tape_state.uef),
+                          tape_vars.record_activated,
+                          &(tape_state.filetype_bits),
+                          tape_vars.save_prefer_112, /* TOHv3.2 */
+                          &(tape_vars.quitsave_config));
+    tape_state_finish(&tape_state, 0); /* 0 = don't alter menus */
     tube_6502_close();
     arm_close();
     x86_close();
@@ -773,10 +983,20 @@ void main_setquit(void)
     quitting = true;
 }
 
+/* TOHv3 */
+void set_shutdown_exit_code (uint8_t c) {
+    /* prevent a new error from scribbling an older one */
+    /* TOHv4-rc1: except SHUTDOWN_EXPIRED which always overrides anything prior */
+    if (    (SHUTDOWN_OK == shutdown_exit_code)
+         || (SHUTDOWN_EXPIRED == c)) {
+        shutdown_exit_code = 0x7f & c;
+    }
+}
+
 int main(int argc, char **argv)
 {
     main_init(argc, argv);
     main_run();
     main_close();
-    return 0;
+    return shutdown_exit_code;
 }
