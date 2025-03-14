@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<CodeAnnotationData version="1.0" productName="SlickEdit Pro" productVersion="29.0.1.0">
+	<AnnotationDef name="Comment" id="580f3fc2-4747-49a2-8b46-cb500ca28e31" author="SlickEdit" creationDate="1/31/2007" lastModifiedDate="1/31/2007" lastModifiedUser="SlickEdit" version="1">
+		<FieldDef name="Comment" type="Multiline Text Control" index="0">
+			<DefaultValue>
+				<![CDATA[]]>
+			</DefaultValue>
+		</FieldDef>
+	</AnnotationDef>
+	<CodeAnnotation annotationDefId="comment" author="rjp" creationDate="12/6/2024 8:43am" lastModifiedUser="rjp" lastModifiedDate="12/6/2024 8:44am" annotationDefVersion="" version="1">
+		<MarkerInfo fileName="src/6502.c" basePath="/Users/rjp/Development/Acorn/b-em/" lineNumber="5854" windowSize="5" lineCount="10">
+			<LinesBefore>
+				<LineText>
+					<![CDATA[                        p.c = (a >= temp);]]>
+				</LineText>
+				<LineText>
+					<![CDATA[                        polltime(5);]]>
+				</LineText>
+				<LineText>
+					<![CDATA[                        takeint = (interrupt && !p.i);]]>
+				</LineText>
+				<LineText>
+					<![CDATA[                        break;]]>
+				</LineText>
+				<LineText>
+					<![CDATA[]]>
+				</LineText>
+			</LinesBefore>
+			<LineText>
+				<![CDATA[                case 0xD2:      /*CMP () */]]>
+			</LineText>
+			<LinesAfter>
+				<LineText>
+					<![CDATA[                        temp = readmem(pc);]]>
+				</LineText>
+				<LineText>
+					<![CDATA[                        pc++;]]>
+				</LineText>
+				<LineText>
+					<![CDATA[                        addr = read_zp_indirect(temp);]]>
+				</LineText>
+				<LineText>
+					<![CDATA[                        temp = readmem(addr);]]>
+				</LineText>
+				<LineText>
+					<![CDATA[                        setzn(a - temp);]]>
+				</LineText>
+			</LinesAfter>
+		</MarkerInfo>
+		<Field name="Comment">
+			<Value>
+				<![CDATA[TA test annotation]]>
+			</Value>
+		</Field>
+	</CodeAnnotation>
+</CodeAnnotationData>
