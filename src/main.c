@@ -123,6 +123,11 @@ const emu_speed_t *emu_speeds = default_speeds;
 int num_emu_speeds = NUM_DEFAULT_SPEEDS;
 static int emu_speed_normal = 4;
 
+/* TOHv4.2 merge */
+static int toh_cli_handle_tapesave (char *argv);
+static int toh_cli_handle_tapetest (char *argv);
+static int toh_cli_handle_expire   (char *argv);
+
 void main_reset()
 {
     m6502_reset();
@@ -154,8 +159,8 @@ static const char helptext[] =
     "-disc disc.ssd  - load disc.ssd into drives :0/:2\n"
     "-disc1 disc.ssd - load disc.ssd into drives :1/:3\n"
     "-autoboot       - boot disc in drive :0\n"
-    "-tape tape.uef  - load tape.uef\n"
-    "-fasttape       - set tape speed to fast\n"
+    "-tape tape.uef  - load tape.uef (or .csw/.tibet/.tibetz)\n"
+    "-fasttape       - enable tape overclocking\n"
     "-Fx             - set maximum video frames skipped\n"
     "-s              - scanlines display mode\n"
     "-i              - interlace display mode\n"
@@ -173,7 +178,20 @@ static const char helptext[] =
     "-printcmd c     - printer output via command as text\n"
     "-printcmdbin c  - printer output via command as binary\n"
     "-vroot host-dir - set the VDFS root\n"
-    "-vdir guest-dir - set the initial (boot) dir in VDFS\n\n";
+    "-vdir guest-dir - set the initial (boot) dir in VDFS\n"
+    "-rs423file file - write RS423 output to file\n"
+    "-tapetest <n>   - bits: 1=quit @ EOF | 2=quit @ err | 4=cat @ boot |\n"             /* TOHv3, v4   */
+    "                        8=cat @ end  | 16=slow startup\n"                           /* TOHv4.1 */
+    "-record         - begin recording to tape at B-Em startup\n"                        /* TOHv3   */
+    "-tapesave file  - save tape copy on exit (format set by extension)\n"               /* TOHv3   */
+    "-tapeskip       - skip silence and leader when loading tapes (faster)\n"            /* TOHv3.2 */
+    "-tape117        - when saving UEF, emit baud chunk &117 before every block\n"       /* TOHv3.2 */
+    "-tape112        - when saving UEF, use chunk &112 rather than &116 for silence\n"   /* TOHv3.2 */
+    "-tapeno0        - when appending to loaded UEF, do not emit origin chunk &0\n"      /* TOHv3.2 */
+    "-tapewavcosine  - when saving WAV, use alternative phase (change tone at peak)\n" /* TOHv4.2 */
+    "-expire <n>     - quit, with predictable exit code, after <n> emulated seconds\n"   /* TOHv3.3 */
+    "-tapenopbp      - do not filter out phantom blocks on tape load\n"
+    "\n";
 
 static double main_calc_timer(int speed)
 {
@@ -251,6 +269,11 @@ typedef enum {
     OPT_PASTE_KBD,
     OPT_PRINT,
     OPT_GROUND,
+    /* TOHv4.2 merge: */
+    OPT_TAPETEST,
+    OPT_TAPESAVE,
+    OPT_RS423FILE,
+    OPT_EXPIRE
 } opt_state;
 
 void main_init(int argc, char *argv[])
@@ -265,8 +288,21 @@ void main_init(int argc, char *argv[])
     ALLEGRO_PATH *cfg_fn = NULL;
     const char *ext, *exec_fn = NULL, *log_file = NULL;
     const char *vroot = NULL, *vdir = NULL;
+    int e; /* TOHv4.2 merge */
+    char *rs423_fn;
+
+    /* TOHv3.3, TOHv4, TOHv4.2 merge */
+    shutdown_exit_code = SHUTDOWN_OK;
+    tape_vars.testing_mode  = 0;
+    e = SHUTDOWN_OK;
+    rs423_fn = NULL;
+
+    /* TOHv4.2 merge */
+    tape_init(&tape_state, &tape_vars);
 
     while (--argc) {
+        //size_t len;   /* TOHv3, TOHv4.2 merge */
+ALLEGRO_PATH *path;
         char *arg = *++argv;
         switch (state) {
             case OPT_GROUND:
@@ -282,7 +318,31 @@ void main_init(int argc, char *argv[])
                     }
                     else if (!strcasecmp(arg, "fullscreen"))
                         fullscreen = 1;
-                    else if (!strcasecmp(arg, "tape"))
+                    /* begin TOHv4.2 merge ... */
+                    else if (!strcasecmp(arg, "rs423file")) {
+                        state = OPT_RS423FILE;
+                    } else if (!strcasecmp(arg, "tapesave")) {
+                        state = OPT_TAPESAVE;
+                    } else if (!strcasecmp(arg, "tapetest")) {      /* TOHv3: must come before -tape */
+                        state = OPT_TAPETEST;
+                    } else if (!strcasecmp(arg, "expire")) {        /* TOHv3.3, TOHv4 */
+                        state = OPT_EXPIRE;
+                    } else if (!strcasecmp(arg, "tapeskip")) {      /* TOHv3.2: must come before -tape */
+                        tape_vars.strip_silence_and_leader = 1;
+                    } else if (!strcasecmp(arg, "tape117")) {       /* TOHv3.2: must come before -tape */
+                        tape_vars.save_always_117 = 1;
+                    } else if (!strcasecmp(arg, "tape112")) {       /* TOHv3.2: must come before -tape */
+                        tape_vars.save_prefer_112 = 1;
+                    } else if (!strcasecmp(arg, "tapeno0")) {       /* TOHv3.2: must come before -tape */
+                        tape_vars.save_do_not_generate_origin_on_append = 1;
+                    } else if (!strcasecmp(arg, "tapenopbp")) {     /* TOHv3.2: must come before -tape */
+                        tape_vars.disable_phantom_block_protection = 1;
+                    } else if (!strcasecmp(arg, "tapewavcosine")) { /* TOHv4.2 */
+                        tape_vars.wav_use_phase_shift = 1;
+                    } else if (!strcasecmp(arg, "record")) {        /* TOHv3 */
+                        e = tape_set_record_activated(&tape_state, &tape_vars, NULL, 1);
+                    /* end TOHv4.2 merge */
+                    } else if (!strcasecmp(arg, "tape"))
                         state = OPT_TAPE;
                     else if (!strcasecmp(arg, "disc") || !strcasecmp(arg, "-disk"))
                         state = OPT_DISC1;
@@ -293,7 +353,7 @@ void main_init(int argc, char *argv[])
                     else if (arg[0] == 't' || arg[0] == 'T')
                         sscanf(&arg[1], "%i", &curtube);
                     else if (!strcasecmp(arg, "fasttape"))
-                        fasttape = true;
+                        tape_vars.overclock = true; /* TOHv4.2 merge */
                     else if (!strcasecmp(arg, "autoboot"))
                         autoboot = 150;
                     else if (arg[0] == 'f' || arg[0]=='F') {
@@ -340,8 +400,7 @@ void main_init(int argc, char *argv[])
                     else if (!strcasecmp(arg, "printcmdbin")) {
                         print_dest = PDEST_PIPE_BIN;
                         state = OPT_PRINT;
-                    }
-                    else {
+                    } else {
                         if (*arg != 'h' && *arg != '?')
                             fprintf(stderr, "b-em: unrecognised option '-%s'\n", arg);
                         fwrite(helptext, sizeof helptext-1, 1, stdout);
@@ -349,17 +408,20 @@ void main_init(int argc, char *argv[])
                     }
                 }
                 else {
-                    ALLEGRO_PATH *path = al_create_path(arg);
+                    path = al_create_path(arg);
                     ext = al_get_path_extension(path);
                     if (ext && !strcasecmp(ext, ".snp")) {
                         if (snap_fn)
                             al_destroy_path(snap_fn);
                         snap_fn = path;
                     }
-                    else if (ext && (!strcasecmp(ext, ".uef") || !strcasecmp(ext, ".csw"))) {
-                        if (tape_fn)
-                            al_destroy_path(tape_fn);
-                        tape_fn = path;
+                    else if ((ext != NULL) && (    ! strcasecmp(ext, ".uef")
+                                                || ! strcasecmp(ext, ".csw")
+                                                || ! strcasecmp(ext, ".tibet")  /* TOHv3: +TIBET */
+                                                || ! strcasecmp(ext, ".tibetz") ) ) {
+                        if (tape_vars.load_filename)
+                            al_destroy_path(tape_vars.load_filename);
+                        tape_vars.load_filename = al_create_path(arg);
                     }
                     else {
                         if (drives[0].discfn)
@@ -383,11 +445,42 @@ void main_init(int argc, char *argv[])
             case OPT_LOGFILE:
                 log_file = arg;
                 break;
-            case OPT_TAPE:
-                if (tape_fn)
-                    al_destroy_path(tape_fn);
-                tape_fn = al_create_path(arg);
+            /* begin TOHv4.2 merge ... */
+            case OPT_EXPIRE:
+                e = toh_cli_handle_expire(arg);
                 break;
+            case OPT_TAPESAVE:
+                e = toh_cli_handle_tapesave(arg);
+                break;
+            case OPT_TAPETEST:
+                e = toh_cli_handle_tapetest(arg);
+                break;
+            case OPT_RS423FILE:
+                rs423_fn = arg;
+                break;
+            case OPT_TAPE:
+                path = al_create_path(arg);
+                ext = al_get_path_extension(path);
+                if ((ext != NULL) && (    ! strcasecmp(ext, ".uef")
+                                       || ! strcasecmp(ext, ".csw")
+                                       || ! strcasecmp(ext, ".tibet")
+                                       || ! strcasecmp(ext, ".tibetz") ) ) {
+                    if (tape_vars.load_filename)
+                        al_destroy_path(tape_vars.load_filename);
+                    tape_vars.load_filename = path;
+                } else {
+                    fprintf(stderr,
+                            "\"-tape\" file extension \"%s\" not recognised; tape ignored\n",
+                            ext);
+                }
+                break;
+                /* end TOHv4.2 merge */
+                /*
+                if (tape_vars.load_filename)
+                    al_destroy_path(tape_vars.load_filename);
+                tape_vars.load_filename = path;
+                break;
+                */
             case OPT_EXEC:
                 exec_fn = arg;
                 break;
@@ -406,13 +499,17 @@ void main_init(int argc, char *argv[])
             case OPT_PRINT:
                 print_filename = arg;
                 print_filename_alloc = false;
+                break;
         }
         state = OPT_GROUND;
+        if (SHUTDOWN_OK != e) { break; } /* TOHv4.2 merge */
     }
     if (state != OPT_GROUND) {
         fputs("b-em: missing argument\n", stderr);
         exit(1);
     }
+
+    if (SHUTDOWN_OK != e) { exit(e); } /* TOHv4.2 merge */
 
     al_init_native_dialog_addon();
     al_set_new_window_title(VERSION_STR);
@@ -422,12 +519,21 @@ void main_init(int argc, char *argv[])
         exit(1);
     }
     key_init();
-    config_load(cfg_fn);
+    /* TOHv4.2 merge: second argument forces certain config
+     * settings (tape related ones right now) not to be read.
+     * Specifically we don't want overclock getting switched
+     * on by default, nor do we want a previous UEF etc. file
+     * being loaded if none is provided on the command line;
+     * these will mess up the tests */
+    config_load(cfg_fn, (tape_vars.testing_mode != 0) || (tape_vars.disable_debug_memview));
     log_open(log_file);
     log_info("main: starting %s", VERSION_STR);
 
     main_load_speeds();
     model_loadcfg();
+
+    /* TOHv3, TOHv3.2, TOHv4.2 merge */
+    acia_init(&sysacia);
 
     ALLEGRO_DISPLAY *display = video_init();
     mode7_makechars();
@@ -488,6 +594,7 @@ void main_init(int argc, char *argv[])
         log_fatal("main: unable to create timer");
         exit(1);
     }
+
     al_register_event_source(queue, al_get_timer_event_source(timer));
     al_init_user_event_source(&evsrc);
     al_register_event_source(queue, &evsrc);
@@ -504,7 +611,10 @@ void main_init(int argc, char *argv[])
     else
         disc_load(0, drives[0].discfn);
     disc_load(1, drives[1].discfn);
-    tape_load(tape_fn);
+    /* TOHv4.2 merge */
+    if (tape_vars.load_filename != NULL) {
+        tape_load(tape_vars.load_filename);
+    }
     if (mmccard_fn)
         mmccard_load(mmccard_fn);
     if (defaultwriteprot)
@@ -514,11 +624,124 @@ void main_init(int argc, char *argv[])
     if (drives[1].discfn)
         gui_set_disc_wprot(1, drives[1].writeprot);
     main_setspeed(emuspeed);
-    debug_start(exec_fn, true);
+    debug_start(exec_fn, ! tape_vars.disable_debug_memview);
     // lovebug
     if (fullscreen)
         video_enterfullscreen();
     // lovebug end
+
+    /* TOHv4.1: mitigate Allegro crash problems under
+     * certain test environments (macOS) by offering a means
+     * of delaying startup */
+    if (tape_vars.testing_mode & TAPE_TEST_SLOW_STARTUP) {
+#ifdef WIN32
+        Sleep(1000);
+#else
+        sleep(1);
+#endif
+    }
+
+    /* TOHv3: if tape testing mode is enabled, do a
+       full catalogue of the tape on startup: */
+    if (tape_vars.testing_mode & TAPE_TEST_CAT_ON_STARTUP) {
+        findfilenames_new(&tape_state,
+                          0,  /* 0 = silent; no UI window: */
+                          ! tape_vars.disable_phantom_block_protection);
+    }
+    if (rs423_fn != NULL) { /* TOHv4: for -rs423file */
+        sysacia_rec_start(rs423_fn);
+    }
+
+}
+
+
+static int toh_cli_handle_expire (char *argv) { /* TOHv4.2 merge */
+#define OSP 15625 /* "otherstuff ticks" per second (see 6502.c) */
+    tape_vars.testing_expire_ticks = OSP * ((int64_t)atoi(argv));
+    if (    (tape_vars.testing_expire_ticks < (1    * ((int64_t)OSP)))
+         || (tape_vars.testing_expire_ticks > (2000 * ((int64_t)OSP)))) {
+        fprintf(stderr,
+                "\"-expire\" value was illegal: %s\n",
+                argv);
+        return SHUTDOWN_STARTUP_FAILURE;
+    }
+    return SHUTDOWN_OK;
+}
+
+static int toh_cli_handle_tapetest (char *argv) { /* TOHv4.2 merge */
+    tape_vars.testing_mode = 0x7f & atoi(argv);
+    tape_vars.disable_debug_memview = 1; /* TOHv4: prevent slew of race conditions on mem view window */
+    /* TOHv4-rc4: now permit -tapetest 0
+     * this suppresses mem view window but doesn't do anything else */
+    if (TAPE_TEST_BAD_MASK & tape_vars.testing_mode) {
+        fprintf(stderr,
+                "\"-tapetest\" value was illegal: %u\n",
+                tape_vars.testing_mode);
+        return SHUTDOWN_STARTUP_FAILURE;
+    }
+    return SHUTDOWN_OK;
+}
+
+
+static int toh_cli_handle_tapesave (char *argv) { /* TOHv4.2 merge */
+
+    uint8_t fail;
+    size_t len;
+    uint8_t tapesave_filetype_bits, tapesave_do_compress;
+
+    fail = 0;
+    tapesave_filetype_bits = 0;
+    tapesave_do_compress = 0;
+
+    /* examine final N characters */
+
+    len = strlen(argv);
+    if (len < 5) {
+        fail = 1;
+    } else if (0 == strcasecmp(argv + (len - 4), ".uef")) {    /* compress UEFs by default */
+        tapesave_filetype_bits = TAPE_FILETYPE_BITS_UEF;
+        tapesave_do_compress = 1;
+    } else if (0 == strcasecmp(argv + (len - 4), ".csw")) {    /* compress CSWs by default */
+        tapesave_filetype_bits = TAPE_FILETYPE_BITS_CSW;
+        tapesave_do_compress = 1;
+    } else if (0 == strcasecmp(argv + (len - 4), ".wav")) {    /* TOHv4.2: new WAV mode */
+        tapesave_filetype_bits = TAPE_FILETYPE_BITS_WAV;
+    }
+
+    if ( ( ! fail ) && (TAPE_FILETYPE_BITS_NONE == tapesave_filetype_bits ) ) {
+        if (len < 7) {
+            fail = 1;
+        } else if (0 == strcasecmp(argv + (len - 6), ".tibet")) {
+            tapesave_filetype_bits = TAPE_FILETYPE_BITS_TIBET;
+        }
+    }
+
+    if ( ( ! fail ) && (TAPE_FILETYPE_BITS_NONE == tapesave_filetype_bits ) ) {
+        if (len < 8) {
+            fail = 1;
+        } else if (0 == strcasecmp(argv + (len - 7), ".unzuef")) { /* extension disables compression */
+            tapesave_filetype_bits = TAPE_FILETYPE_BITS_UEF;
+        } else if (0 == strcasecmp(argv + (len - 7), ".unzcsw")) { /* extension disables compression */
+            tapesave_filetype_bits = TAPE_FILETYPE_BITS_CSW;
+        } else if (0 == strcasecmp(argv + (len - 7), ".tibetz")) {
+            tapesave_filetype_bits = TAPE_FILETYPE_BITS_TIBET;
+            tapesave_do_compress = 1;
+        }
+    }
+
+    if (fail) {
+        fprintf(stderr, "\"-tapesave\" filename was too short: %s\n", argv);
+        exit(1);
+    } else if (TAPE_FILETYPE_BITS_NONE == tapesave_filetype_bits) {
+        fprintf(stderr, "\"-tapesave\": unrecognised filetype, ignored: %s\n", argv);
+    } else {
+        tape_vars.quitsave_config.filename      = argv;
+        tape_vars.quitsave_config.filetype_bits = tapesave_filetype_bits;
+        tape_vars.quitsave_config.do_compress   = tapesave_do_compress;
+    }
+
+    return SHUTDOWN_OK;
+
 }
 
 void main_restart()
@@ -640,7 +863,8 @@ static void main_timer(ALLEGRO_EVENT *event)
             ddnoise_headdown();
 
         if (tapeledcount) {
-            if (--tapeledcount == 0 && !motor) {
+            /* TOHv3.3: state, not vars */
+            if ( --tapeledcount == 0 && ! tape_state.ula_motor ) {
                 log_debug("main: delayed cassette motor LED off");
                 led_update(LED_CASSETTE_MOTOR, 0, 0);
             }
@@ -700,7 +924,12 @@ void main_run()
     ALLEGRO_EVENT event;
 
     log_debug("main: about to start timer");
-    al_start_timer(timer);
+    if (NULL == timer) { /* TOHv3.3: sanity check */
+        log_warn("BUG: cannot start a NULL timer!\n");
+        quitting = 1;
+    } else {
+        al_start_timer(timer);
+    }
 
     log_debug("main: entering main loop");
     while (!quitting) {
@@ -770,21 +999,20 @@ void main_run()
                     main_resume();
         }
     }
-    log_debug("main: end loop");
-}
-
-static void tape_free(void)
-{
-    if (tape_fn) {
-        al_destroy_path(tape_fn);
-        tape_fn = NULL;
+    if (tape_vars.testing_mode & TAPE_TEST_CAT_ON_SHUTDOWN) { /* TOHv4 */
+        findfilenames_new(&tape_state,
+                          0,  /* 0 = silent; no UI window: */
+                          ! tape_vars.disable_phantom_block_protection);
     }
+    log_debug("main: end loop");
 }
 
 void main_close()
 {
     gui_tapecat_close();
     gui_keydefine_close();
+    
+    sysacia_rec_stop(); /* TOHv4 */
 
     debug_kill();
 
@@ -793,8 +1021,15 @@ void main_close()
 
     midi_close();
     mem_close();
-    uef_close();
-    csw_close();
+    
+    /* TOHv3 */
+    tape_save_on_shutdown(&(tape_state),
+                          tape_vars.record_activated,
+                          &(tape_state.filetype_bits),   /* save using same type as we loaded (or any type if not loaded) */
+                          tape_vars.save_prefer_112,     /* TOHv3.2 */
+                          tape_vars.wav_use_phase_shift, /* TOHv4.2 */
+                          &(tape_vars.quitsave_config));
+    tape_state_finish(&tape_state, 0); /* 0 = don't alter menus */
     tube_6502_close();
     arm_close();
     x86_close();
@@ -811,7 +1046,6 @@ void main_close()
     music5000_close();
     ddnoise_close();
     tapenoise_close();
-    tape_free();
     al_destroy_timer(timer);
     al_destroy_event_queue(queue);
     led_close();

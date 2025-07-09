@@ -1270,8 +1270,13 @@ void video_poll(int clocks, int timer_enable)
                         video_doblit(crtc_mode, crtc[4]);
                     }
                     ccount++;
-                    if (ccount == 10 || ((!motor || !fasttape) && !is_free_run()))
-                        ccount = 0;
+#ifdef BUILD_TAPE_NO_FASTTAPE_VIDEO_HACKS
+                    /* TOHv3.2 */
+                    if ( (10 == ccount) || ! is_free_run() ) { ccount = 0; }
+#else
+                    /* original code */
+                    if (ccount == 10 || (((tape_state.ula_motor) || !tape_vars.overclock) && !is_free_run())) { ccount = 0; }
+#endif
                     scry = 0;
                     if (timer_enable) {
                         stopwatch_vblank = stopwatch;

@@ -147,7 +147,9 @@ ALLEGRO_COLOR get_config_colour(const char *sect, const char *key, ALLEGRO_COLOR
     return cdefault;
 }
 
-void config_load(ALLEGRO_PATH *path)
+/* TOHv4.2: add doing_testing argument to prevent certain config
+ * settings being loaded */
+void config_load(ALLEGRO_PATH *path, uint8_t doing_testing)
 {
     if (path || (path = find_cfg_file("b-em", ".cfg"))) {
         const char *cpath = al_path_cstr(path, ALLEGRO_NATIVE_PATH_SEP);
@@ -172,8 +174,8 @@ void config_load(ALLEGRO_PATH *path)
         mmb_fn = get_config_strdup("disc", "mmb");
     if (!mmccard_fn)
         mmccard_fn = get_config_strdup("disc", "mmcard");
-    if (!tape_fn)
-        tape_fn = get_config_path("tape", "tape");
+    if ( ( ! doing_testing ) && !tape_vars.load_filename) /* TOHv4.2 merge */
+        tape_vars.load_filename = get_config_path("tape", "tape");
 
     al_remove_config_key(bem_cfg, "", "video_resize");
     al_remove_config_key(bem_cfg, "", "tube6502speed");
@@ -229,8 +231,9 @@ void config_load(ALLEGRO_PATH *path)
 
     mode7_fontfile   = get_config_string("video", "mode7font", "saa5050");
 
-    if (!fasttape && get_config_bool("tape", "fasttape", false))
-        fasttape = true;
+    /* TOHv4.2 merge */
+    if ( ( ! doing_testing ) && !tape_vars.overclock && get_config_bool("tape", "fasttape", false))
+        tape_vars.overclock = true;
 
     scsi_enabled     = get_config_bool("disc", "scsienable", 0);
     ide_enable       = get_config_bool("disc", "ideenable", 0);
@@ -338,9 +341,10 @@ void config_save(void)
         set_config_string("disc", "mmccard", mmccard_fn);
         set_config_bool("disc", "defaultwriteprotect", defaultwriteprot);
 
-        if (tape_loaded)
-            al_set_config_value(bem_cfg, "tape", "tape", al_path_cstr(tape_fn, ALLEGRO_NATIVE_PATH_SEP));
-        else
+        /* TOHv3, TOHv4.2 */
+        if (TAPE_IS_LOADED(tape_state.filetype_bits)) { /* TOHv4: now a macro */
+            al_set_config_value(bem_cfg, "tape", "tape", al_path_cstr(tape_vars.load_filename, ALLEGRO_NATIVE_PATH_SEP));
+        } else
             al_remove_config_key(bem_cfg, "tape", "tape");
 
         set_config_bool(NULL, "autopause", autopause);
@@ -381,7 +385,7 @@ void config_save(void)
         set_config_int("video", "ledvisibility", vid_ledvisibility);
         set_config_string("video", "mode7font", mode7_fontfile);
 
-        set_config_bool("tape", "fasttape", fasttape);
+        set_config_bool("tape", "fasttape", tape_vars.overclock);
 
         set_config_bool("disc", "scsienable", scsi_enabled);
         set_config_bool("disc", "ideenable", ide_enable);

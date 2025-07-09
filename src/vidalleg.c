@@ -307,7 +307,7 @@ static inline void save_screenshot(void)
                         break;
                     case VDT_UNSET:
                 }
-                region = al_lock_bitmap(b, ALLEGRO_PIXEL_FORMAT_ARGB_8888, ALLEGRO_LOCK_WRITEONLY);
+                region = al_lock_bitmap(b, ALLEGRO_PIXEL_FORMAT_ARGB_8888, ALLEGRO_LOCK_READWRITE);
                 break;
             case VDC_PAL:
                 switch(vid_dtype_intern) {
@@ -468,7 +468,7 @@ static inline void blit_screen(void)
                     upscale_only(b, firstx, firsty << 1, xsize, ysize  << 1, scr_x_start, scr_y_start, scr_x_size, scr_y_size);
                 case VDT_UNSET:
             }
-            region = al_lock_bitmap(b, ALLEGRO_PIXEL_FORMAT_ARGB_8888, ALLEGRO_LOCK_WRITEONLY);
+            region = al_lock_bitmap(b, ALLEGRO_PIXEL_FORMAT_ARGB_8888, ALLEGRO_LOCK_READWRITE);
             break;
         case VDC_PAL:
             switch(vid_dtype_intern) {
@@ -593,7 +593,12 @@ void video_doblit(bool non_ttx, uint8_t vtotal)
         save_screenshot();
 
     ++framesrun;
-    if (++fskipcount >= ((motor && fasttape) ? 5 : vid_fskipmax)) {
+#ifdef BUILD_TAPE_NO_FASTTAPE_VIDEO_HACKS
+    if (++fskipcount >= vid_fskipmax) { /* TOHv3.2 */
+#else
+    /* (this was the original code) */
+    if (++fskipcount >= ((tape_state.ula_motor && tape_vars.overclock) ? 5 : vid_fskipmax)) {
+#endif
         if (fullscreen_pending) {
             ALLEGRO_DISPLAY *display = al_get_current_display();
             int newsizex = al_get_display_width(display);
