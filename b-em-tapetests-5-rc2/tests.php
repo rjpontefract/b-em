@@ -1654,7 +1654,7 @@
     // if no tapetest quit condition was specified
     $extra_args = " -tapetest $tapetest_bits $extra_args";
 
-    $cl = B_EM_EXE." -sp9 -exec ".PATH_DEBUGGER_EXEC_TMPFILE." -debug $extra_args"; // -bp-shutdown
+    $cl = B_EM_EXE." -sp4 -exec ".PATH_DEBUGGER_EXEC_TMPFILE." -debug $extra_args"; // -bp-shutdown
 
     if ($verbose) {
       print "$cl\n";
