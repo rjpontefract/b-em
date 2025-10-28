@@ -21,7 +21,7 @@ ISRELEASED="no"
 
 AC_MSG_CHECKING([whether to enable debugging])
 AC_ARG_ENABLE(debug,
-	      AC_HELP_STRING([--enable-debug], [build debug executable]))
+	      AS_HELP_STRING([--enable-debug], [build debug executable]))
 
 CF_WARNINGS="-Wall -Wno-format-security"
 CFLAGS="$CFLAGS $CF_WARNINGS -std=gnu11 -D_GNU_SOURCE"
@@ -91,7 +91,8 @@ AC_CHECK_HEADERS(jack/jack.h alsa/asoundlib.h)
 AC_SEARCH_LIBS(jack_port_register,jack jack2)
 AC_CHECK_LIB(asound,snd_rawmidi_open)
 
-AC_OUTPUT([Makefile src/Makefile])
+AC_CONFIG_FILES([Makefile src/Makefile])
+AC_OUTPUT()
 
 echo
 echo "Configured version: $VERSION"
