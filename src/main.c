@@ -1,3 +1,4 @@
+#define _DEBUG
 /*B-em v2.2 by Tom Walker
   Main loop + start/finish code*/
 
@@ -77,6 +78,7 @@ bool keydefining = false;
 bool autopause = false;
 bool autoskip = true;
 bool skipover = false;
+unsigned hiresdisplay = BOOL_USE_CONFIG;
 int autoboot=0;
 int joybutton[4];
 float joyaxes[4];
@@ -171,6 +173,8 @@ static const char helptext[] =
     "-debug          - start debugger\n"
     "-debugtube      - start debugging tube processor\n"
     "-exec file      - debugger to execute file\n"
+    "-hires          - enable Hi-Res display mode\n"
+    "-lores          - disable Hi-Res display mode\n"
     "-paste string   - paste string in as if typed (via OS)\n"
     "-pastek string  - paste string in as if typed (via KB)\n"
     "-printfile f    - printer output to file as text\n"
@@ -400,7 +404,12 @@ ALLEGRO_PATH *path;
                     else if (!strcasecmp(arg, "printcmdbin")) {
                         print_dest = PDEST_PIPE_BIN;
                         state = OPT_PRINT;
-                    } else {
+                    }
+                    else if (!strcasecmp(arg, "hires"))
+                        hiresdisplay = true;
+                    else if (!strcasecmp(arg, "lores"))
+                        hiresdisplay = false;
+                    else {
                         if (*arg != 'h' && *arg != '?')
                             fprintf(stderr, "b-em: unrecognised option '-%s'\n", arg);
                         fwrite(helptext, sizeof helptext-1, 1, stdout);
@@ -972,7 +981,7 @@ void main_run()
                 break;
             case ALLEGRO_EVENT_DISPLAY_CLOSE:
                 log_debug("main: event display close - quitting");
-                quitting = true;
+                set_quit();
                 break;
             case ALLEGRO_EVENT_TIMER:
                 main_timer(&event);
@@ -1087,6 +1096,13 @@ void main_resume(void)
 {
     if (emuspeed != EMU_SPEED_PAUSED && emuspeed != EMU_SPEED_FULL)
         al_start_timer(timer);
+}
+
+void set_quit(void)
+{
+    quitting = true; /* for outer loops */
+    cycles = 0;      /* stop the host (I/O) processor */
+    tubecycles = 0;  /* stop the tube processor */
 }
 
 /* TOHv3 */

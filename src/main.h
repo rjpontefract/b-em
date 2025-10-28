@@ -41,6 +41,7 @@ extern bool keydefining;
 extern bool autopause;
 extern bool autoskip;
 extern bool skipover;
+extern unsigned hiresdisplay;
 
 /* TOHv3: although C exit code is an int, Unix shells don't safely allow
    you to use values > 125, so this is limited to a signed 8-bit value >:( */
@@ -63,6 +64,7 @@ void main_key_pause(void);
 void main_cleardrawit(void);
 void main_setmouse(void);
 
+void set_quit(void);
 void set_shutdown_exit_code (uint8_t c); /* TOHv3 */
 
 #endif

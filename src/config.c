@@ -182,6 +182,8 @@ void config_load(ALLEGRO_PATH *path, uint8_t doing_testing)
     defaultwriteprot = get_config_bool("disc", "defaultwriteprotect", 1);
 
     autopause        = get_config_bool(NULL, "autopause", false);
+    if (hiresdisplay & BOOL_USE_CONFIG)
+        hiresdisplay = get_config_bool(NULL, "hiresdisplay", hiresdisplay & 1);
 
     if (curmodel == -1)
         curmodel = get_config_int(NULL, "model", 3);
@@ -216,6 +218,7 @@ void config_load(ALLEGRO_PATH *path, uint8_t doing_testing)
 
     vid_ledlocation  = get_config_int("video", "ledlocation",   0);
     vid_ledvisibility = get_config_int("video", "ledvisibility", 2);
+    vid_lock_type    = get_config_int("video", "videolocktype", ALLEGRO_LOCK_READWRITE);
 
     int displaymode = get_config_int("video", "displaymode", 0);
     if (vid_dtype_user == VDT_UNSET)
@@ -348,6 +351,7 @@ void config_save(void)
             al_remove_config_key(bem_cfg, "tape", "tape");
 
         set_config_bool(NULL, "autopause", autopause);
+        set_config_bool(NULL, "hiresdisplay", hiresdisplay);
 
         set_config_int(NULL, "model", curmodel);
         set_config_int(NULL, "tube", selecttube);

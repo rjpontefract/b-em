@@ -17,6 +17,7 @@ int vid_fskipmax = 1;
 int vid_fullborders = 1;
 int vid_ledlocation = LED_LOC_NONE;
 int vid_ledvisibility = LED_VIS_ALWAYS;
+int vid_lock_type;
 
 static int fskipcount;
 
@@ -254,7 +255,7 @@ static void mono_convert(int x1, int y1, int x2, int y2, ALLEGRO_COLOR mono_col)
     float mono_r, mono_g, mono_b;
     al_unmap_rgb_f(mono_col, &mono_r, &mono_g, &mono_b);
     log_debug("mono_convert: mono_r=%g, mono_g=%g, mono_b=%g", mono_r, mono_g, mono_b);
-    ALLEGRO_LOCKED_REGION *dest_region = al_lock_bitmap(b32, ALLEGRO_PIXEL_FORMAT_ARGB_8888, ALLEGRO_LOCK_WRITEONLY);
+    ALLEGRO_LOCKED_REGION *dest_region = al_lock_bitmap(b32, ALLEGRO_PIXEL_FORMAT_ARGB_8888, vid_lock_type);
     for (int y = y1; y < y2; ++y) {
         char *src_row = (char *)region->data + region->pitch * y;
         char *dest_row = (char *)dest_region->data + dest_region->pitch * y;
@@ -306,8 +307,9 @@ static inline void save_screenshot(void)
                         al_draw_scaled_bitmap(b, firstx, firsty << 1, xsize, ysize << 1, 0, 0, xsize, ysize << 1, 0);
                         break;
                     case VDT_UNSET:
+                        break;
                 }
-                region = al_lock_bitmap(b, ALLEGRO_PIXEL_FORMAT_ARGB_8888, ALLEGRO_LOCK_READWRITE);
+                region = al_lock_bitmap(b, ALLEGRO_PIXEL_FORMAT_ARGB_8888, vid_lock_type);
                 break;
             case VDC_PAL:
                 switch(vid_dtype_intern) {
@@ -334,6 +336,7 @@ static inline void save_screenshot(void)
                         al_draw_bitmap_region(b32, firstx, firsty << 1, xsize, ysize << 1, 0, 0, 0);
                         break;
                     case VDT_UNSET:
+                        break;
                 }
                 break;
             case VDC_GREEN:
@@ -369,6 +372,7 @@ static inline void save_screenshot(void)
                         al_draw_bitmap_region(b32, firstx, firsty << 1, xsize, ysize << 1, 0, 0, 0);
                         break;
                     case VDT_UNSET:
+                        break;
                 }
                 break;
         }
@@ -467,8 +471,9 @@ static inline void blit_screen(void)
                     al_unlock_bitmap(b);
                     upscale_only(b, firstx, firsty << 1, xsize, ysize  << 1, scr_x_start, scr_y_start, scr_x_size, scr_y_size);
                 case VDT_UNSET:
+                    break;
             }
-            region = al_lock_bitmap(b, ALLEGRO_PIXEL_FORMAT_ARGB_8888, ALLEGRO_LOCK_READWRITE);
+            region = al_lock_bitmap(b, ALLEGRO_PIXEL_FORMAT_ARGB_8888, vid_lock_type);
             break;
         case VDC_PAL:
             switch(vid_dtype_intern) {
@@ -495,6 +500,7 @@ static inline void blit_screen(void)
                     upscale_only(b32, firstx, firsty << 1, xsize, ysize << 1, scr_x_start, scr_y_start, scr_x_size, scr_y_size);
                     break;
                 case VDT_UNSET:
+                    break;
             }
             break;
         case VDC_GREEN:
@@ -530,6 +536,7 @@ static inline void blit_screen(void)
                     upscale_only(b32, firstx, firsty << 1, xsize, ysize << 1, scr_x_start, scr_y_start, scr_x_size, scr_y_size);
                     break;
                 case VDT_UNSET:
+                    break;
 
             }
     }

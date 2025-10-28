@@ -79,22 +79,25 @@ static void printer_outchar(unsigned val, FILE *fp)
 {
     if (print_dest == PDEST_FILE_BIN || print_dest == PDEST_PIPE_BIN) {
         /*
-         * For binary printing, the file with have been opened with the
-         * 'b' flag and we use the stream is narrow (byte-oriented) mode
+         * For binary printing, the file will have been opened with the
+         * 'b' flag and we use the stream in narrow (byte-oriented) mode
          */
         if (putc(val, fp) != EOF)
             return;
     }
-    else if (val != '\n') {
+    else {
         /*
          * For text printing, we assume the guest printer ignore character
          * is set to the default LF, so we only get CR characters for end
-         * of line.
+         * of line.  If we do get an LF, because someone has changed the
+         * printer ignore charcter, we ignore it anyway.
          *
          * We also translate character code 0x60 into the Unicode code
          * point for the pound sign and hope that the encoding of wide
          * characters is Unicode.
          */
+        if (val == '\n')
+            return;
         if (val == '\r')
             val = '\n';
         else if (val == 0x60)
@@ -153,17 +156,17 @@ static void printer_open(unsigned val)
             break;
         case PDEST_FILE_TEXT:
             if (val)
-                printer_open_file(val, "wt");
+                printer_open_file(val, "a");
             break;
         case PDEST_FILE_BIN:
-            printer_open_file(val, "rb");
+            printer_open_file(val, "ab");
             break;
         case PDEST_PIPE_TEXT:
             if (val)
-                printer_open_pipe(val, "rt");
+                printer_open_pipe(val, "a");
             break;
         case PDEST_PIPE_BIN:
-            printer_open_pipe(val, "rb");
+            printer_open_pipe(val, "ab");
     }
 }
 
