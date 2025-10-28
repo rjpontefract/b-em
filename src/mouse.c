@@ -28,7 +28,7 @@ static float stick_calc(double posn, double limit)
 
 void mouse_axes(ALLEGRO_EVENT *event)
 {
-    log_debug("mouse: axes event, x=%d, y=%d, dx=%d, mx=%d, dy=%d, my=%d", event->mouse.x, event->mouse.y, event->mouse.dx, mx, event->mouse.dy, my);
+    //log_debug("mouse: axes event, x=%d, y=%d, dx=%d, mx=%d, dy=%d, my=%d", event->mouse.x, event->mouse.y, event->mouse.dx, mx, event->mouse.dy, my);
     if (curtube == 3) {
         mx += event->mouse.dx;
         my += event->mouse.dy;
