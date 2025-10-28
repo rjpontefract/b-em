@@ -4208,7 +4208,7 @@ static void mvp(void)
     clockspc(12);
 }
 
-static void mvn(void)
+static void mvnrjp(void)
 {
     uint8_t temp;
     uint32_t addr;
@@ -4378,7 +4378,7 @@ static void (*opcodes[5][256])() =
         eorIndirecty8,      /* X1M1 51 */
         eorIndirect8,       /* X1M1 52 */
         eorsIndirecty8,     /* X1M1 53 */
-        mvn,                /* X1M1 54 */
+        mvnrjp,             /* X1M1 54 */
         eorZpx8,            /* X1M1 55 */
         lsrZpx8,            /* X1M1 56 */
         eorIndirectLongy8,  /* X1M1 57 */
@@ -4636,7 +4636,7 @@ static void (*opcodes[5][256])() =
         eorIndirecty16,     /* X1M0 51 */
         eorIndirect16,      /* X1M0 52 */
         eorsIndirecty16,    /* X1M0 53 */
-        mvn,                /* X1M0 54 */
+        mvnrjp,                /* X1M0 54 */
         eorZpx16,           /* X1M0 55 */
         lsrZpx16,           /* X1M0 56 */
         eorIndirectLongy16, /* X1M0 57 */
@@ -4894,7 +4894,7 @@ static void (*opcodes[5][256])() =
         eorIndirecty8,      /* X0M1 51 */
         eorIndirect8,       /* X0M1 52 */
         eorsIndirecty8,     /* X0M1 53 */
-        mvn,                /* X0M1 54 */
+        mvnrjp,                /* X0M1 54 */
         eorZpx8,            /* X0M1 55 */
         lsrZpx8,            /* X0M1 56 */
         eorIndirectLongy8,  /* X0M1 57 */
@@ -5152,7 +5152,7 @@ static void (*opcodes[5][256])() =
         eorIndirecty16,     /* X0M0 51 */
         eorIndirect16,      /* X0M0 52 */
         eorsIndirecty16,    /* X0M0 53 */
-        mvn,                /* X0M0 54 */
+        mvnrjp,                /* X0M0 54 */
         eorZpx16,           /* X0M0 55 */
         lsrZpx16,           /* X0M0 56 */
         eorIndirectLongy16, /* X0M0 57 */
@@ -5410,7 +5410,7 @@ static void (*opcodes[5][256])() =
         eorIndirectyE,      /* EMUL 51 */
         eorIndirect8,       /* EMUL 52 */
         eorsIndirecty8,     /* EMUL 53 */
-        mvn,                /* EMUL 54 */
+        mvnrjp,                /* EMUL 54 */
         eorZpx8,            /* EMUL 55 */
         lsrZpx8,            /* EMUL 56 */
         eorIndirectLongy8,  /* EMUL 57 */

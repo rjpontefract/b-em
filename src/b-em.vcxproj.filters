@@ -375,6 +375,21 @@
     <ClInclude Include="fullscreen.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="mc68000tube.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="mmb.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="musahi\m68kcpu.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="tibet.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="textsave.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ResourceCompile Include="b-em.rc">
@@ -509,9 +524,6 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="resid-fp\convolve.cc">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="resid-fp\convolve-sse.cc">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="resid-fp\envelope.cc">
@@ -728,6 +740,27 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="fullscreen.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="mc68000tube.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="mmb.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="musahi\m68kcpu.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="tibet.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="musahi\m68kdasm.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="musahi\m68kops.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="textsave.c">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>
