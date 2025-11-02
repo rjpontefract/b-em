@@ -1,6 +1,8 @@
 #ifndef __INC_GUI_ALLEGRO_H
 #define __INC_GUI_ALLEGRO_H
 
+#include "tape2.h" /* some build options for tape */
+
 typedef enum {
     IDM_ZERO,
     IDM_FILE_RESET,
@@ -44,11 +46,34 @@ typedef enum {
     IDM_DISC_VDFS_ENABLE,
     IDM_DISC_VDFS_ROOT,
     IDM_TAPE_LOAD,
+    IDM_TAPE_SAVE,             /* TOHv3 */
+    IDM_TAPE_SAVE_UEF,         /* TOHv3 */
+    IDM_TAPE_SAVE_UEF_UNCOMP,  /* TOHv3.2 */
+    IDM_TAPE_SAVE_TIBET,       /* TOHv3 */
+    IDM_TAPE_SAVE_TIBETZ,      /* TOHv3 */
+    IDM_TAPE_SAVE_CSW,         /* TOHv3 */
+    IDM_TAPE_SAVE_CSW_UNCOMP,  /* TOHv3.2 */
+    IDM_TAPE_SAVE_WAV,         /* TOHv4.2: WAV mode */
+    IDM_TAPE_RECORD,           /* TOHv3 */
+#ifdef BUILD_TAPE_DEV_MENU
+    IDM_TAPE_CORRUPT_READ,     /* TOHv3 */
+    IDM_TAPE_MISFRAME_READ,    /* TOHv3 */
+    IDM_TAPE_GEN_PARITY_ERROR, /* TOHv3 */
+    IDM_TAPE_DEV,              /* TOHv3 */
+#endif
     IDM_TAPE_REWIND,
     IDM_TAPE_EJECT,
     IDM_TAPE_CAT,
-    IDM_TAPE_SPEED_NORMAL,
-    IDM_TAPE_SPEED_FAST,
+#ifdef BUILD_TAPE_TAPECTRL
+    IDM_TAPE_TAPECTRL,                                /* TOHv4.3 */
+#endif
+    IDM_TAPE_TURBO_OVERCLOCK,                         /* TOHv3.2 */
+    IDM_TAPE_TURBO_SKIP,                              /* TOHv3.2 */
+    IDM_TAPE_OPTS_SAVE_UEF_FORCE_117,                 /* TOHv3.2 */
+    IDM_TAPE_OPTS_SAVE_UEF_FORCE_112,                 /* TOHv3.2 */
+    IDM_TAPE_OPTS_SAVE_UEF_SUPPRESS_ORGN_ON_APPEND,   /* TOHv3.2 */
+    IDM_TAPE_OPTS_SAVE_WAV_PHASE_SHIFT,               /* TOHv4.2 */
+    IDM_TAPE_OPTS_LOAD_FILTER_PHANTOMS,               /* TOHv3.3, v4.2 */
     IDM_ROMS_LOAD,
     IDM_ROMS_CLEAR,
     IDM_ROMS_RAM,
@@ -74,6 +99,7 @@ typedef enum {
     IDM_SOUND_DAC,
     IDM_SOUND_DDNOISE,
     IDM_SOUND_TAPE,
+    IDM_SOUND_TAPE_RELAY, /* TOHv2 */
     IDM_SOUND_FILTER,
     IDM_WAVE,
     IDM_SID_TYPE,
@@ -121,5 +147,8 @@ extern void gui_allegro_destroy(ALLEGRO_EVENT_QUEUE *queue, ALLEGRO_DISPLAY *dis
 extern void gui_allegro_event(ALLEGRO_EVENT *event);
 extern void gui_allegro_set_eject_text(int drive, ALLEGRO_PATH *path);
 extern void gui_set_disc_wprot(int drive, bool enabled);
-
+extern void gui_alter_tape_menus(uint8_t const filetype_bits);
+extern void gui_alter_tape_menus_2(void);
+void gui_alter_tape_eject (const char * const path);
+extern void gui_set_record_mode (bool const activated); /* TOHv3.2 */
 #endif

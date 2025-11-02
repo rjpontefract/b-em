@@ -3,6 +3,7 @@
 #include "tapecat-allegro.h"
 #include "csw.h"
 #include "uef.h"
+#include "tape.h"
 
 static ALLEGRO_TEXTLOG *textlog;
 ALLEGRO_EVENT_SOURCE uevsrc;
@@ -22,36 +23,35 @@ static void *tapecat_thread(ALLEGRO_THREAD *thread, void *tdata)
         al_init_user_event_source(&uevsrc);
         al_register_event_source(queue, &uevsrc);
         al_register_event_source(queue, al_get_native_text_log_event_source(ltxtlog));
-        do
+        do {
             al_wait_for_event(queue, &event);
-        while (event.type != ALLEGRO_EVENT_NATIVE_DIALOG_CLOSE);
+        } while (event.type != ALLEGRO_EVENT_NATIVE_DIALOG_CLOSE);
         textlog = NULL;                    // set the global that cataddname will see to NULL
-        al_close_native_text_log(ltxtlog); // before destorying the textlog with our local copy.
+        al_close_native_text_log(ltxtlog); // before destroying the textlog with our local copy.
         al_destroy_event_queue(queue);
     }
     return NULL;
 }
 
-static void start_cat(void)
+static void start_cat (bool const enable_phantom_block_protection) /* TOHv3.3: parameter */
 {
-    if (csw_ena)
-        csw_findfilenames();
-    else
-        uef_findfilenames();
+    findfilenames_new(&tape_state,
+                      true, /* TOHv3: show UI */
+                      enable_phantom_block_protection);
 }
 
 void gui_tapecat_start(void)
 {
-    if (textlog)
-        start_cat();
-    else {
+    if (textlog) {
+        start_cat( ! tape_vars.permit_phantoms );
+    } else {
         ALLEGRO_TEXTLOG *ltxtlog = al_open_native_text_log("B-Em Tape Catalogue", ALLEGRO_TEXTLOG_MONOSPACE);
         if (ltxtlog) {
             ALLEGRO_THREAD *thread = al_create_thread(tapecat_thread, ltxtlog);
             if (thread) {
                 al_start_thread(thread);
                 textlog = ltxtlog; // open to writes from cataddname.
-                start_cat();
+                start_cat( ! tape_vars.permit_phantoms );
                 return;
             }
             al_close_native_text_log(ltxtlog);

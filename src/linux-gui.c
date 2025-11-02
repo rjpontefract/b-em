@@ -140,8 +140,8 @@ void gui_update()
         discmenu[6].flags = (writeprot[1]) ? D_SELECTED : 0;
         discmenu[7].flags = (defaultwriteprot) ? D_SELECTED : 0;
         discmenu[9].flags = (vdfs_enabled) ? D_SELECTED : 0;
-        tapespdmenu[0].flags = (!fasttape) ? D_SELECTED : 0;
-        tapespdmenu[1].flags = (fasttape)  ? D_SELECTED : 0;
+        tapespdmenu[0].flags = (!tape_vars.overclock) ? D_SELECTED : 0;
+        tapespdmenu[1].flags = (tape_vars.overclock)  ? D_SELECTED : 0;
         for (x = 0; x < NUM_MODELS; x++) modelmenu[x].flags = 0;
         for (x = 0; x < NUM_MODELS; x++) {
             if (curmodel == (intptr_t)modelmenu[x].dp)
@@ -419,13 +419,13 @@ MENU discmenu[12]=
 
 int gui_normal()
 {
-        fasttape = false;
+        tape_vars.overclock = false;
         gui_update();
         return D_CLOSE;
 }
 int gui_fast()
 {
-        fasttape = true;
+        tape_vars.overclock = true;
         gui_update();
         return D_CLOSE;
 }
@@ -442,13 +442,13 @@ int gui_loadt()
         char tempname[260];
         int ret;
         int xsize = windx - 32, ysize = windy - 16;
-        memcpy(tempname, al_path_cstr(tape_fn, ALLEGRO_NATIVE_PATH_SEP), 260);
-        ret=file_select_ex("Please choose a tape image", tempname, "UEF;CSW", 260, xsize, ysize);
+        memcpy(tempname, al_path_cstr(tape_vars.load_filename, ALLEGRO_NATIVE_PATH_SEP), 260);
+        ret=file_select_ex("Please choose a tape image", tempname, "UEF;CSW;TIBET;TIBETZ", 260, xsize, ysize);
         if (ret)
         {
             tape_close();
-            tape_fn = al_create_path(tempname);
-            tape_load(tape_fn);
+            tape_vars.load_filename = al_create_path(tempname);
+            tape_load(tape_vars.load_filename);
             tape_loaded = 1;
         }
         return D_CLOSE;
@@ -457,7 +457,7 @@ int gui_loadt()
 int gui_rewind()
 {
         tape_close();
-        tape_load(tape_fn);
+        tape_load(tape_vars.load_filename);
         return D_CLOSE;
 }
 

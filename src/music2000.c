@@ -20,7 +20,7 @@ m2000_dev_t m2000_out1;
 m2000_dev_t m2000_out2;
 m2000_dev_t m2000_out3;
 
-static void acia_tx(ACIA *acia, uint8_t data) {
+static int acia_tx(ACIA *acia, uint8_t data) {
     m2000_dev_t *m2000 = acia->udata;
 
     if (data & 0x80) {               // status byte
@@ -84,27 +84,31 @@ static void acia_tx(ACIA *acia, uint8_t data) {
                 m2000->state = MS_ONE_OF_TWO;
         }
     }
+    return 0; /* TOHv3.3: ACIA callbacks return an error now */
 }
 
 static ACIA music2000_acia1 = {
-    .tx_hook = acia_tx,
-    .udata   = &m2000_out1,
-    .intnum  = 0x100,
-    .name    = "M2000:1"
+    .tx_hook       = acia_tx,
+    .udata         = &m2000_out1,
+    .intnum        = 0x100,
+    .name          = "M2000:1",
+    .tx_no_polling = 1 /* TOHv4: instantaneous writes */
 };
 
 static ACIA music2000_acia2 = {
-    .tx_hook = acia_tx,
-    .udata   = &m2000_out2,
-    .intnum  = 0x200,
-    .name    = "M2000:2"
+    .tx_hook       = acia_tx,
+    .udata         = &m2000_out2,
+    .intnum        = 0x200,
+    .name          = "M2000:2",
+    .tx_no_polling = 1 /* TOHv4 */
 };
 
 static ACIA music2000_acia3 = {
-    .tx_hook = acia_tx,
-    .udata   = &m2000_out3,
-    .intnum  = 0x300,
-    .name    = "M2000:3"
+    .tx_hook       = acia_tx,
+    .udata         = &m2000_out3,
+    .intnum        = 0x300,
+    .name          = "M2000:3",
+    .tx_no_polling = 1 /* TOHv4 */
 };
 
 uint8_t music2000_read(uint32_t addr) {
@@ -132,12 +136,6 @@ void music2000_write(uint32_t addr, uint8_t val) {
             acia_write(&music2000_acia3, addr, val);
             break;
     }
-}
-
-void music2000_poll(void) {
-    acia_poll(&music2000_acia1);
-    acia_poll(&music2000_acia2);
-    acia_poll(&music2000_acia3);
 }
 
 void music2000_init(midi_dev_t *out1, midi_dev_t *out2, midi_dev_t *out3) {

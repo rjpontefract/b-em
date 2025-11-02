@@ -1,5 +1,6 @@
 #include "b-em.h"
 #include <allegro5/allegro_native_dialog.h>
+#include <allegro5/allegro_primitives.h> /* TOHv4.3 */
 #include "gui-allegro.h"
 
 #include "6502.h"
@@ -35,6 +36,9 @@
 #include "video.h"
 #include "video_render.h"
 #include "vdfs.h"
+#include "serial.h"
+#include "tapenoise.h" /* TOHv4.1-rc9 */
+#include "tapectrl.h"  /* TOHv4.3 */
 
 #if defined(HAVE_JACK_JACK_H) || defined(HAVE_ALSA_ASOUNDLIB_H)
 #define HAVE_LINUX_MIDI
@@ -56,6 +60,24 @@ typedef struct {
 
 static ALLEGRO_MENU *disc_menu;
 static ALLEGRO_MENU *rom_menu;
+
+/* TOHv3.2, 3.3: */
+static ALLEGRO_MENU *tape_opts_save_menu;
+/* TOHv3.3: */
+static ALLEGRO_MENU *tape_opts_load_menu;
+/* TOHv3: */
+static ALLEGRO_MENU *tape_save_menu;
+static ALLEGRO_MENU *tape_main_menu;
+/* can define BUILD_TAPE_DEV_MENU, to get the "Mischief..." menu items
+   within the Tape menu: */
+#ifdef BUILD_TAPE_DEV_MENU
+static ALLEGRO_MENU *tape_dev_menu;
+#endif
+static ALLEGRO_MENU *create_tape_save_menu(void);
+#ifdef BUILD_TAPE_DEV_MENU
+static ALLEGRO_MENU *create_tape_dev_menu(void);
+#endif
+static void tape_save_menu_nothing(ALLEGRO_EVENT *ev);
 
 static inline int menu_id_num(menu_id_t id, int num)
 {
@@ -202,25 +224,103 @@ void gui_allegro_set_eject_text(int drive, ALLEGRO_PATH *path)
     al_set_menu_item_caption(disc_menu, menu_id_num(IDM_DISC_EJECT, drive), temp);
 }
 
+
+#include "taperead.h"
+
 static ALLEGRO_MENU *create_tape_menu(void)
 {
-    ALLEGRO_MENU *menu = al_create_menu();
     ALLEGRO_MENU *speed = al_create_menu();
-    int nflags, fflags;
+    ALLEGRO_MENU *menu = al_create_menu();
+    ALLEGRO_MENU *m_opts = al_create_menu(); /* TOHv3.2 */
+    tape_opts_save_menu = al_create_menu();
+    tape_opts_load_menu = al_create_menu();  /* TOHv3.3 */
+    int fflags;
     al_append_menu_item(menu, "Load tape...", IDM_TAPE_LOAD, 0, NULL, NULL);
-    al_append_menu_item(menu, "Rewind tape", IDM_TAPE_REWIND, 0, NULL, NULL);
+    al_append_menu_item(menu, "Save tape copy...", IDM_TAPE_SAVE, 0, NULL, create_tape_save_menu());
     al_append_menu_item(menu, "Eject tape", IDM_TAPE_EJECT, 0, NULL, NULL);
-    al_append_menu_item(menu, "Catalogue tape", IDM_TAPE_CAT, 0, NULL, NULL);
-    if (fasttape) {
-        nflags = ALLEGRO_MENU_ITEM_CHECKBOX;
+    al_append_menu_item(menu, "Rewind tape playback", IDM_TAPE_REWIND, 0, NULL, NULL);
+    fflags = ALLEGRO_MENU_ITEM_CHECKBOX | (tape_is_record_activated(&tape_vars) ? ALLEGRO_MENU_ITEM_CHECKED : 0);
+    al_append_menu_item(menu, "Record and append to tape", IDM_TAPE_RECORD, fflags, NULL, NULL);
+    fflags = 0;
+#ifdef BUILD_TAPE_MENU_GREYOUT_CAT
+    if ( ! tape_peek_for_data (&tape_state) ) {
+        fflags |= ALLEGRO_MENU_ITEM_DISABLED;
+    }
+#endif
+    al_append_menu_item(menu, "Catalogue tape", IDM_TAPE_CAT, fflags, NULL, NULL);
+    
+#ifdef BUILD_TAPE_TAPECTRL
+    fflags = 0;
+    al_append_menu_item(menu, "Control tape...", IDM_TAPE_TAPECTRL, fflags, NULL, NULL);
+#endif
+
+    /* updated for TOHv3.2: */
+    if (tape_vars.overclock) {
+        /*nflags = ALLEGRO_MENU_ITEM_CHECKBOX;*/
         fflags = ALLEGRO_MENU_ITEM_CHECKBOX|ALLEGRO_MENU_ITEM_CHECKED;
     } else {
-        nflags = ALLEGRO_MENU_ITEM_CHECKBOX|ALLEGRO_MENU_ITEM_CHECKED;
+        /*nflags = ALLEGRO_MENU_ITEM_CHECKBOX|ALLEGRO_MENU_ITEM_CHECKED;*/
         fflags = ALLEGRO_MENU_ITEM_CHECKBOX;
     }
-    al_append_menu_item(speed, "Normal", IDM_TAPE_SPEED_NORMAL, nflags, NULL, NULL);
-    al_append_menu_item(speed, "Fast", IDM_TAPE_SPEED_FAST, fflags, NULL, NULL);
-    al_append_menu_item(menu, "Tape speed", 0, 0, NULL, speed);
+    al_append_menu_item(speed, "Overclock ACIA + fast DCD (dubious)", IDM_TAPE_TURBO_OVERCLOCK, fflags, NULL, NULL);
+    /*al_append_menu_item(speed, "Fast (unreliable)", IDM_TAPE_TURBO_SKIP, fflags, NULL, NULL);*/
+    if (tape_vars.strip_silence_and_leader) {
+        fflags = ALLEGRO_MENU_ITEM_CHECKBOX|ALLEGRO_MENU_ITEM_CHECKED;
+    } else {
+        fflags = ALLEGRO_MENU_ITEM_CHECKBOX;
+    }
+    al_append_menu_item(speed, "Skip leader/gaps + fast DCD", IDM_TAPE_TURBO_SKIP, fflags, NULL, NULL);
+    al_append_menu_item(menu, "Options", 0, 0, NULL, m_opts);
+    al_append_menu_item(menu, "Turbo load", 0, 0, NULL, speed);
+    
+    /* SAVE OPTIONS */
+    if ( tape_vars.save_always_117 ) {
+        fflags = ALLEGRO_MENU_ITEM_CHECKBOX|ALLEGRO_MENU_ITEM_CHECKED;
+    } else {
+        fflags = ALLEGRO_MENU_ITEM_CHECKBOX;
+    }
+    al_append_menu_item(tape_opts_save_menu, "UEF: Emit baud chunk (117) before each block",
+                        IDM_TAPE_OPTS_SAVE_UEF_FORCE_117, fflags, NULL, NULL);
+                        
+    if ( tape_vars.save_prefer_112 ) {
+        fflags = ALLEGRO_MENU_ITEM_CHECKBOX|ALLEGRO_MENU_ITEM_CHECKED;
+    } else {
+        fflags = ALLEGRO_MENU_ITEM_CHECKBOX;
+    }
+    al_append_menu_item(tape_opts_save_menu, "UEF: Use chunk 112, not 116, for gaps",
+                        IDM_TAPE_OPTS_SAVE_UEF_FORCE_112, fflags, NULL, NULL);
+                        
+    if ( tape_vars.save_do_not_generate_origin_on_append ) {
+        fflags = ALLEGRO_MENU_ITEM_CHECKBOX|ALLEGRO_MENU_ITEM_CHECKED;
+    } else {
+        fflags = ALLEGRO_MENU_ITEM_CHECKBOX;
+    }
+    al_append_menu_item(tape_opts_save_menu, "UEF: Suppress origin chunk (0) on append",
+                        IDM_TAPE_OPTS_SAVE_UEF_SUPPRESS_ORGN_ON_APPEND, fflags, NULL, NULL);
+                        
+    /* TOHv4.2 */
+    if ( tape_vars.wav_use_phase_shift ) {
+        fflags = ALLEGRO_MENU_ITEM_CHECKBOX|ALLEGRO_MENU_ITEM_CHECKED;
+    } else {
+        fflags = ALLEGRO_MENU_ITEM_CHECKBOX;
+    }
+    al_append_menu_item(tape_opts_save_menu, "WAV: Use cosine, not sine",
+                        IDM_TAPE_OPTS_SAVE_WAV_PHASE_SHIFT, fflags, NULL, NULL);
+    
+    /* LOAD OPTIONS */
+    if ( tape_vars.permit_phantoms ) { /* TOHv4.3 */
+        fflags = ALLEGRO_MENU_ITEM_CHECKBOX;
+    } else {
+        fflags = ALLEGRO_MENU_ITEM_CHECKBOX|ALLEGRO_MENU_ITEM_CHECKED;
+    }
+    al_append_menu_item(tape_opts_load_menu, "Strip squawks and phantom blocks",
+                        IDM_TAPE_OPTS_LOAD_FILTER_PHANTOMS, fflags, NULL, NULL);
+    al_append_menu_item(m_opts, "Loading", 0, 0, NULL, tape_opts_load_menu);
+    al_append_menu_item(m_opts, "Saving",  0, 0, NULL, tape_opts_save_menu);
+#ifdef BUILD_TAPE_DEV_MENU
+    al_append_menu_item(menu, "Mischief", IDM_TAPE_DEV, 0, NULL, create_tape_dev_menu());
+#endif
+    tape_main_menu = menu;
     return menu;
 }
 
@@ -463,7 +563,8 @@ static ALLEGRO_MENU *create_sound_menu(void)
     add_checkbox_item(menu, "Paula",                 IDM_SOUND_PAULA,     sound_paula);
     add_checkbox_item(menu, "Printer port DAC",      IDM_SOUND_DAC,       sound_dac);
     add_checkbox_item(menu, "Disc drive noise",      IDM_SOUND_DDNOISE,   sound_ddnoise);
-    add_checkbox_item(menu, "Tape noise",            IDM_SOUND_TAPE,      sound_tape);
+    add_checkbox_item(menu, "Tape signal",           IDM_SOUND_TAPE,      sound_tape);
+    add_checkbox_item(menu, "Tape relay clicks",     IDM_SOUND_TAPE_RELAY, sound_tape_relay); /* TOHv2 */
     add_checkbox_item(menu, "Internal sound filter", IDM_SOUND_FILTER,    sound_filter);
     sub = al_create_menu();
     add_radio_set(sub, wave_names, IDM_WAVE, curwave);
@@ -637,6 +738,102 @@ void gui_allegro_init(ALLEGRO_EVENT_QUEUE *queue, ALLEGRO_DISPLAY *display)
     al_append_menu_item(menu, "Debug", 0, 0, NULL, create_debug_menu());
     al_set_display_menu(display, menu);
     al_register_event_source(queue, al_get_default_menu_event_source());
+}
+
+/* TOHv3.2 */
+void gui_set_record_mode (bool const activated) {
+    int flags;
+    flags = activated ? ALLEGRO_MENU_ITEM_CHECKED : 0;
+    al_set_menu_item_flags(tape_main_menu, IDM_TAPE_RECORD, flags);
+}
+
+/* TOHv3 */
+void gui_alter_tape_menus (uint8_t const filetype_bits) {
+
+    int flags;
+
+    if (NULL == tape_save_menu) {
+        log_warn("gui: alter tape submenu: tape_save_menu is NULL");
+        return;
+    }
+    
+    if (NULL == tape_main_menu) {
+        log_warn("gui: alter tape submenu: tape_main_menu is NULL");
+        return;
+    }
+    
+    flags = (TAPE_FILETYPE_BITS_UEF & filetype_bits) ? 0 : ALLEGRO_MENU_ITEM_DISABLED;
+    
+    al_set_menu_item_flags(tape_save_menu, IDM_TAPE_SAVE_UEF, flags);
+    al_set_menu_item_flags(tape_save_menu, IDM_TAPE_SAVE_UEF_UNCOMP, flags); /* TOHv3.2 */
+    
+    flags = (filetype_bits & TAPE_FILETYPE_BITS_TIBET) ? 0 : ALLEGRO_MENU_ITEM_DISABLED;
+    al_set_menu_item_flags(tape_save_menu, IDM_TAPE_SAVE_TIBET, flags);
+    al_set_menu_item_flags(tape_save_menu, IDM_TAPE_SAVE_TIBETZ, flags);
+    
+    flags = (filetype_bits & TAPE_FILETYPE_BITS_CSW) ? 0 : ALLEGRO_MENU_ITEM_DISABLED;
+    al_set_menu_item_flags(tape_save_menu, IDM_TAPE_SAVE_CSW, flags);
+    al_set_menu_item_flags(tape_save_menu, IDM_TAPE_SAVE_CSW_UNCOMP, flags); /* TOHv3.2 */
+
+    /* WAV becomes available when at least one other format is also available */
+    flags = (TAPE_FILETYPE_BITS_NONE == filetype_bits) ? ALLEGRO_MENU_ITEM_DISABLED : 0;
+    al_set_menu_item_flags(tape_save_menu, IDM_TAPE_SAVE_WAV, flags);
+
+    gui_alter_tape_menus_2();
+
+}
+
+void gui_alter_tape_menus_2(void) {
+    int flags;
+    /* this one is for greying out Catalogue Tape in the main tape menu */
+    flags = 0;
+#ifdef BUILD_TAPE_MENU_GREYOUT_CAT
+    if (!tape_peek_for_data(&tape_state)) {
+        flags = ALLEGRO_MENU_ITEM_DISABLED;
+    }
+#endif
+    al_set_menu_item_flags (tape_main_menu, IDM_TAPE_CAT, flags);
+}
+
+/* TOHv3 */
+void gui_alter_tape_eject (const char * const path) {
+    size_t z, len, pfxlen, sfxlen, sfx2len;
+    char *s;
+    const char *pfx, *sfx, *sfx2;
+    if (NULL == path) {
+        al_set_menu_item_caption (tape_main_menu, IDM_TAPE_EJECT, "Eject tape");
+    } else {
+        if (path[0]=='\0') { return; }
+        for (z = strlen(path);
+             (z > 0) && ((path[z-1] != '/') && (path[z-1] != '\\'));
+             z--) ;
+        /* decided to go with the colon rather than the brackets;
+           brackets are slightly confusing given that they're also
+           used for "Rewind (playback only)" */
+        pfx = "Eject tape: ";
+        sfx = "";
+        sfx2 = "...";
+        pfxlen = strlen(pfx);
+        sfxlen = strlen(sfx);
+        sfx2len = strlen(sfx2);
+        len = strlen(path+z);
+#define GUI_MENU_TAPEFILE_MAXLEN 63
+        if (len > GUI_MENU_TAPEFILE_MAXLEN) {
+            len = GUI_MENU_TAPEFILE_MAXLEN - 3;
+            sfx = sfx2;
+            sfxlen = sfx2len;
+        }
+        s = malloc(len + 1 + pfxlen + sfxlen);
+        if (NULL == s) {
+            log_warn("gui: alter tape eject menu entry: malloc failed for filename");
+            return; 
+        }
+        memcpy (s,            pfx,    pfxlen);
+        memcpy (s+pfxlen,     path+z, len);
+        memcpy (s+pfxlen+len, sfx,    sfxlen+1);
+        al_set_menu_item_caption (tape_main_menu, IDM_TAPE_EJECT, s);
+        free(s);
+    }
 }
 
 void gui_allegro_destroy(ALLEGRO_EVENT_QUEUE *queue, ALLEGRO_DISPLAY *display)
@@ -997,52 +1194,276 @@ static void disc_vdfs_root(const char *path)
 static void tape_load_ui(ALLEGRO_EVENT *event)
 {
     const char *fpath;
-    if (!tape_fn || !(fpath = al_path_cstr(tape_fn, ALLEGRO_NATIVE_PATH_SEP)))
+    bool tapectrl_opened; /* TOHv4.3-a3 */
+    /*int e;*/ /* TOHv4.3 */
+    if (!tape_vars.load_filename || !(fpath = al_path_cstr(tape_vars.load_filename, ALLEGRO_NATIVE_PATH_SEP)))
         fpath = ".";
-    ALLEGRO_FILECHOOSER *chooser = al_create_native_file_dialog(fpath, "Choose a tape to load", "*.uef;*.csw", ALLEGRO_FILECHOOSER_FILE_MUST_EXIST);
+    ALLEGRO_FILECHOOSER *chooser = al_create_native_file_dialog(fpath, "Choose a tape to load", "*.uef;*.csw;*.tibet;*.tibetz", ALLEGRO_FILECHOOSER_FILE_MUST_EXIST);
     if (chooser) {
         ALLEGRO_DISPLAY *display = (ALLEGRO_DISPLAY *)(event->user.data2);
         if (al_show_native_file_dialog(display, chooser)) {
             if (al_get_native_file_dialog_count(chooser) > 0) {
-                tape_close();
+                /* TOHv3 */
+                tape_state_finish(&tape_state, 1); /* alter menus */
+                tapectrl_opened = false;
+#ifdef BUILD_TAPE_TAPECTRL
+                tapectrl_opened = tape_vars.tapectrl_opened;
+#endif
+                tape_set_record_activated(&tape_state, &tape_vars, &sysacia, false, tapectrl_opened);
                 ALLEGRO_PATH *path = al_create_path(al_get_native_file_dialog_path(chooser, 0));
-                tape_load(path);
-                tape_fn = path;
-                tape_loaded = 1;
+                /*e =*/ tape_load(&tape_state, &tape_vars, path); /* TOHv4.3: tape_handle_exception() should deal with errors, so ignore return code */
+                tape_vars.load_filename = path;
             }
         }
     }
 }
 
-static void tape_rewind(void)
-{
-    tape_close();
-    tape_load(tape_fn);
+/* TOHv3 */
+/* FIXME: pass in tape_state and tape_vars */
+static int tape_save (ALLEGRO_EVENT *event, const char *ext) {
+    ALLEGRO_PATH *apath = tape_vars.save_filename; /* tape file chooser path */
+    ALLEGRO_FILECHOOSER *chooser;
+    const char *fpath;
+    char name[20], title[70];
+    int e; /* TOHv4.2 */
+    
+    e = TAPE_E_OK;
+
+    snprintf(name, sizeof(name), "new%s", strchr(ext, '.')); /* e.g. name = "new.ssd" */
+    if (NULL != apath) {
+        apath = al_clone_path(apath);
+        al_set_path_filename(apath, name);
+        fpath = al_path_cstr(apath, ALLEGRO_NATIVE_PATH_SEP);
+    } else {
+        fpath = name;
+    }
+    snprintf(title, sizeof(title), "Choose a tape file name to create");
+    if ((chooser = al_create_native_file_dialog(fpath, title, ext, ALLEGRO_FILECHOOSER_SAVE))) {
+        ALLEGRO_DISPLAY *display = (ALLEGRO_DISPLAY *)(event->user.data2);
+        if (al_show_native_file_dialog(display, chooser)) {
+            if (al_get_native_file_dialog_count(chooser) > 0) {
+                ALLEGRO_PATH *path = al_create_path(al_get_native_file_dialog_path(chooser, 0));
+                /*disc_close(drive);*/
+                /* ^^ we don't do this because tape doesn't work this way.
+                      we only have one tape loaded, and we can save
+                      repeated snapshots of it. We can load a completely
+                      new tape, but that's using the "load tape" dialogue,
+                      not the "save tape" one. */
+                if (NULL != tape_vars.save_filename) {
+                    al_destroy_path(tape_vars.save_filename);
+                }
+                tape_vars.save_filename = path;
+
+                switch(menu_get_id(event)) {
+                    case IDM_TAPE_SAVE_UEF:
+                    case IDM_TAPE_SAVE_UEF_UNCOMP: /* TOHv3.2 */
+                        e = tape_generate_and_save_output_file (&tape_state,
+                                                                TAPE_FILETYPE_BITS_UEF,
+                                                                tape_vars.save_prefer_112, /* TOHv3.2 */
+                                                                (char *) al_path_cstr(path, ALLEGRO_NATIVE_PATH_SEP),
+                                                                menu_get_id(event)==IDM_TAPE_SAVE_UEF, /* compress? */
+                                                                &sysacia); /* might need resetting */
+                        break;
+                    case IDM_TAPE_SAVE_TIBET:
+                        e = tape_generate_and_save_output_file (&tape_state,
+                                                                TAPE_FILETYPE_BITS_TIBET,
+                                                                0,
+                                                                (char *) al_path_cstr(path, ALLEGRO_NATIVE_PATH_SEP),
+                                                                0, /* no Z => no compression */
+                                                                &sysacia);
+                        break;
+                    case IDM_TAPE_SAVE_TIBETZ:
+                        e = tape_generate_and_save_output_file (&tape_state,
+                                                                TAPE_FILETYPE_BITS_TIBET,
+                                                                0,
+                                                                (char *) al_path_cstr(path, ALLEGRO_NATIVE_PATH_SEP),
+                                                                1, /* with Z => compress */
+                                                                &sysacia);
+                        break;
+                    case IDM_TAPE_SAVE_CSW:
+                    case IDM_TAPE_SAVE_CSW_UNCOMP: /* TOHv3.2 */
+                        e = tape_generate_and_save_output_file (&tape_state,
+                                                                TAPE_FILETYPE_BITS_CSW,
+                                                                0,
+                                                                (char *) al_path_cstr(path, ALLEGRO_NATIVE_PATH_SEP),
+                                                                menu_get_id(event)==IDM_TAPE_SAVE_CSW, /* compress? */
+                                                                &sysacia);
+                        break;
+                    case IDM_TAPE_SAVE_WAV: /* TOHv4.2 */
+                        /* any valid available file type data makes it possible
+                           to save a WAV */
+                        if (TAPE_FILETYPE_BITS_NONE != tape_state.filetype_bits) {
+                            e = tapenoise_write_wav(&tape_state,
+                                                    (char *) al_path_cstr (path, ALLEGRO_NATIVE_PATH_SEP),
+                                                    tape_vars.wav_use_phase_shift);
+                        }
+                        break;
+                    default:
+                        break;
+                }
+            }
+        }
+        al_destroy_native_file_dialog(chooser);
+    }
+    if (fpath != name)
+        al_destroy_path(apath);
+    return e;
 }
 
-static void tape_eject(void)
-{
-    tape_close();
-    tape_loaded = 0;
+/* TOHv3 */
+static ALLEGRO_MENU *create_tape_save_menu(void)
+ {
+    ALLEGRO_MENU *menu = al_create_menu();
+    al_append_menu_item (menu, "UEF...",                IDM_TAPE_SAVE_UEF,        0, NULL, NULL);
+    al_append_menu_item (menu, "UEF (uncompressed)...", IDM_TAPE_SAVE_UEF_UNCOMP, 0, NULL, NULL); /* TOHv3.2 */
+    al_append_menu_item (menu, "TIBETZ...",             IDM_TAPE_SAVE_TIBETZ,     0, NULL, NULL);
+    al_append_menu_item (menu, "TIBET...",              IDM_TAPE_SAVE_TIBET,      0, NULL, NULL);
+    al_append_menu_item (menu, "CSW...",                IDM_TAPE_SAVE_CSW,        0, NULL, NULL);
+    al_append_menu_item (menu, "CSW (uncompressed)...", IDM_TAPE_SAVE_CSW_UNCOMP, 0, NULL, NULL); /* TOHv3.2 */
+    al_append_menu_item (menu, "WAV...",                IDM_TAPE_SAVE_WAV,        0, NULL, NULL); /* TOHv4.2 */
+    tape_save_menu = menu;
+    return menu;
+}
+#ifdef BUILD_TAPE_DEV_MENU
+static ALLEGRO_MENU *create_tape_dev_menu(void) {
+
+    ALLEGRO_MENU *menu = al_create_menu();
+
+#define TAPE_DEV_COMEDY_EMOTES ""
+/* text version */
+/*#define TAPE_DEV_COMEDY_EMOTES " >:-)"*/
+/* alt. unicode emoji version */
+/*#define TAPE_DEV_COMEDY_EMOTES " \xF0\x9F\x98\x88"*/
+
+    al_append_menu_item(menu, "Corrupt next ACIA read" TAPE_DEV_COMEDY_EMOTES, IDM_TAPE_CORRUPT_READ, 0, NULL, NULL);
+    al_append_menu_item(menu, "Mis-frame next ACIA read" TAPE_DEV_COMEDY_EMOTES, IDM_TAPE_MISFRAME_READ, 0, NULL, NULL);
+    al_append_menu_item(menu, "Generate parity error on next ACIA read" TAPE_DEV_COMEDY_EMOTES, IDM_TAPE_GEN_PARITY_ERROR, 0, NULL, NULL);
+
+    tape_dev_menu = menu;
+
+    return menu;
+}
+#endif
+
+
+static void tape_save_menu_nothing(ALLEGRO_EVENT *ev) {
+
 }
 
-static void tape_normal(ALLEGRO_EVENT *event)
+static void gui_eject_tape(void)
+{
+    tape_ejected_by_user(&tape_state, &tape_vars, &sysacia);
+}
+
+/* TOHv3.2: repurposed */
+static void tape_toggle_turbo_overclock(ALLEGRO_EVENT *event)
 {
     ALLEGRO_MENU *menu = (ALLEGRO_MENU *)(event->user.data3);
 
-    if (fasttape) {
-        fasttape = false;
-        al_set_menu_item_flags(menu, IDM_TAPE_SPEED_FAST, ALLEGRO_MENU_ITEM_CHECKBOX);
+    /* toggle */
+    if (tape_vars.overclock) {
+        tape_vars.overclock = false;
+        al_set_menu_item_flags(menu, IDM_TAPE_TURBO_OVERCLOCK, ALLEGRO_MENU_ITEM_CHECKBOX);
+    } else {
+        tape_vars.overclock = true;
+        al_set_menu_item_flags(menu, IDM_TAPE_TURBO_OVERCLOCK, ALLEGRO_MENU_ITEM_CHECKBOX|ALLEGRO_MENU_ITEM_CHECKED);
+    }
+    
+    serial_recompute_dividers_and_thresholds (tape_vars.overclock,
+                                              tape_state.ula_ctrl_reg,
+                                              &(tape_state.ula_rx_thresh_ns),
+                                              &(tape_state.ula_tx_thresh_ns),
+                                              &(tape_state.ula_rx_divider),
+                                              &(tape_state.ula_tx_divider));
+    
+}
+
+static void tape_toggle_filter_phantoms (ALLEGRO_EVENT *event) {
+    ALLEGRO_MENU *menu = (ALLEGRO_MENU *)(event->user.data3);
+
+    /* toggle */
+    if (tape_vars.permit_phantoms) {
+        tape_vars.permit_phantoms = false;
+        al_set_menu_item_flags(menu,
+                               IDM_TAPE_OPTS_LOAD_FILTER_PHANTOMS,
+                               ALLEGRO_MENU_ITEM_CHECKBOX|ALLEGRO_MENU_ITEM_CHECKED);
+    } else {
+        tape_vars.permit_phantoms = true;
+        al_set_menu_item_flags(menu,
+                               IDM_TAPE_OPTS_LOAD_FILTER_PHANTOMS,
+                               ALLEGRO_MENU_ITEM_CHECKBOX);
     }
 }
 
-static void tape_fast(ALLEGRO_EVENT *event)
+static void tape_toggle_force_112 (ALLEGRO_EVENT *event) {
+    ALLEGRO_MENU *menu = (ALLEGRO_MENU *)(event->user.data3);
+
+    /* toggle */
+    if (tape_vars.save_prefer_112) {
+        tape_vars.save_prefer_112 = 0;
+        al_set_menu_item_flags(menu, IDM_TAPE_OPTS_SAVE_UEF_FORCE_112, ALLEGRO_MENU_ITEM_CHECKBOX);
+    } else {
+        tape_vars.save_prefer_112 = 1;
+        al_set_menu_item_flags(menu,
+                               IDM_TAPE_OPTS_SAVE_UEF_FORCE_112,
+                               ALLEGRO_MENU_ITEM_CHECKBOX|ALLEGRO_MENU_ITEM_CHECKED);
+    }
+}
+
+static void tape_toggle_force_117 (ALLEGRO_EVENT *event) {
+    ALLEGRO_MENU *menu = (ALLEGRO_MENU *)(event->user.data3);
+
+    /* toggle */
+    if (tape_vars.save_always_117) {
+        tape_vars.save_always_117 = 0;
+        al_set_menu_item_flags(menu, IDM_TAPE_OPTS_SAVE_UEF_FORCE_117, ALLEGRO_MENU_ITEM_CHECKBOX);
+    } else {
+        tape_vars.save_always_117 = 1;
+        al_set_menu_item_flags(menu,
+                               IDM_TAPE_OPTS_SAVE_UEF_FORCE_117,
+                               ALLEGRO_MENU_ITEM_CHECKBOX|ALLEGRO_MENU_ITEM_CHECKED);
+    }
+}
+
+static void tape_toggle_append_origin (ALLEGRO_EVENT *event) {
+    ALLEGRO_MENU *menu = (ALLEGRO_MENU *)(event->user.data3);
+
+    /* toggle */
+    if (tape_vars.save_do_not_generate_origin_on_append) {
+        tape_vars.save_do_not_generate_origin_on_append = 0;
+        al_set_menu_item_flags(menu,
+                               IDM_TAPE_OPTS_SAVE_UEF_SUPPRESS_ORGN_ON_APPEND,
+                               ALLEGRO_MENU_ITEM_CHECKBOX);
+    } else {
+        tape_vars.save_do_not_generate_origin_on_append = 1;
+        al_set_menu_item_flags(menu,
+                               IDM_TAPE_OPTS_SAVE_UEF_SUPPRESS_ORGN_ON_APPEND,
+                               ALLEGRO_MENU_ITEM_CHECKBOX|ALLEGRO_MENU_ITEM_CHECKED);
+    }
+}
+
+/* TOHv3.2: repurposed */
+static void tape_toggle_turbo_skip(ALLEGRO_EVENT *event)
 {
     ALLEGRO_MENU *menu = (ALLEGRO_MENU *)(event->user.data3);
 
-    if (!fasttape) {
-        fasttape = true;
-        al_set_menu_item_flags(menu, IDM_TAPE_SPEED_NORMAL, ALLEGRO_MENU_ITEM_CHECKBOX);
+    if ( tape_vars.strip_silence_and_leader ) {
+        tape_vars.strip_silence_and_leader = 0;
+        al_set_menu_item_flags(menu, IDM_TAPE_TURBO_SKIP, ALLEGRO_MENU_ITEM_CHECKBOX);
+    } else {
+        tape_vars.strip_silence_and_leader = 1;
+        al_set_menu_item_flags(menu, IDM_TAPE_TURBO_SKIP, ALLEGRO_MENU_ITEM_CHECKBOX|ALLEGRO_MENU_ITEM_CHECKED);
+    }
+}
+
+static void tape_toggle_wav_use_phase_shift(ALLEGRO_EVENT *event) {
+    ALLEGRO_MENU *menu = (ALLEGRO_MENU *)(event->user.data3);
+    if ( tape_vars.wav_use_phase_shift ) {
+        tape_vars.wav_use_phase_shift = 0;
+        al_set_menu_item_flags(menu, IDM_TAPE_OPTS_SAVE_WAV_PHASE_SHIFT, ALLEGRO_MENU_ITEM_CHECKBOX);
+    } else {
+        tape_vars.wav_use_phase_shift = 1;
+        al_set_menu_item_flags(menu, IDM_TAPE_OPTS_SAVE_WAV_PHASE_SHIFT, ALLEGRO_MENU_ITEM_CHECKBOX|ALLEGRO_MENU_ITEM_CHECKED);
     }
 }
 
@@ -1183,8 +1604,25 @@ static void toggle_music5000(void)
 static const char all_dext[] = "*.ssd;*.dsd;*.img;*.adf;*.ads;*.adm;*.adl;*.sdd;*.ddd;*.fdi;*.imd;*.hfe;"
                                "*.SSD;*.DSD;*.IMG;*.ADF;*.ADS;*.ADM;*.ADL;*.SDD;*.DDD;*.FDI;*.IMD;*.HFE";
 
+#include "tapeseek.h"
+
 void gui_allegro_event(ALLEGRO_EVENT *event)
 {
+    /* TOHv4.3 */
+    bool tape_rec, tcw_opened;
+    tape_ctrl_window_t *tcw;
+#ifdef BUILD_TAPE_TAPECTRL
+    int e;
+    int32_t tape_pos_1200ths;
+#endif
+
+    tcw = NULL;
+    tcw_opened = false;
+#ifdef BUILD_TAPE_TAPECTRL
+    tcw = &(tape_vars.tapectrl);
+    tcw_opened = tape_vars.tapectrl_opened;
+#endif
+
     switch(menu_get_id(event)) {
         case IDM_ZERO:
             break;
@@ -1301,20 +1739,115 @@ void gui_allegro_event(ALLEGRO_EVENT *event)
         case IDM_TAPE_LOAD:
             tape_load_ui(event);
             break;
+        /* TOHv3 */
+        case IDM_TAPE_SAVE:
+            tape_save_menu_nothing(event);
+            break;
+        case IDM_TAPE_SAVE_UEF:
+        case IDM_TAPE_SAVE_UEF_UNCOMP: /* TOHv3.2 */
+            tape_save(event, "*.uef");
+            break;
+        case IDM_TAPE_SAVE_TIBET:
+            tape_save(event, "*.tibet");
+            break;
+        case IDM_TAPE_SAVE_TIBETZ:
+            tape_save(event, "*.tibetz");
+            break;
+        case IDM_TAPE_SAVE_CSW:
+        case IDM_TAPE_SAVE_CSW_UNCOMP: /* TOHv3.2 */
+            tape_save(event, "*.csw");
+            break;
+        case IDM_TAPE_SAVE_WAV:        /* TOHv4.2 */
+            tape_save(event, "*.wav");
+            break;
+        case IDM_TAPE_RECORD:
+            /* toggle */
+            tape_rec = ! tape_is_record_activated (&tape_vars);
+#ifdef BUILD_TAPE_TAPECTRL
+            if (tcw_opened) {
+                tape_pos_1200ths = 0;
+                if (tape_rec) {
+                    tape_get_duration_1200ths(&tape_state, &tape_pos_1200ths);
+                }
+                tapectrl_set_record(&(tape_vars.tapectrl), tape_rec, tape_pos_1200ths);
+            }
+#endif
+            tape_set_record_activated (&tape_state,
+                                       &tape_vars,
+                                       &sysacia,
+                                       tape_rec,
+                                       tcw_opened);
+            break;
+#ifdef BUILD_TAPE_DEV_MENU
+        case IDM_TAPE_DEV:
+            tape_save_menu_nothing(event);
+            break;
+        case IDM_TAPE_CORRUPT_READ:
+            sysacia.corrupt_next_read = 1;
+            break;
+        case IDM_TAPE_MISFRAME_READ:
+            /* can use Atic Atac's third-stage loader (after the "red rain") to test this one ... */
+            sysacia.misframe_next_read = 1;
+            break;
+        case IDM_TAPE_GEN_PARITY_ERROR:
+            /* can use Atic Atac's third-stage loader (after the "red rain") to test this one? */
+            sysacia.gen_parity_error_next_read = 1;
+            break;
+#endif
         case IDM_TAPE_REWIND:
-            tape_rewind();
+            tape_rewind_2(&tape_state,
+                          tcw,
+                          tape_vars.record_activated,
+                          tcw_opened);
             break;
         case IDM_TAPE_EJECT:
-            tape_eject();
+            gui_eject_tape();
             break;
-        case IDM_TAPE_SPEED_NORMAL:
-            tape_normal(event);
+        case IDM_TAPE_TURBO_OVERCLOCK:
+            tape_toggle_turbo_overclock(event);
             break;
-        case IDM_TAPE_SPEED_FAST:
-            tape_fast(event);
+        case IDM_TAPE_TURBO_SKIP:
+            tape_toggle_turbo_skip(event);
             break;
         case IDM_TAPE_CAT:
             gui_tapecat_start();
+            break;
+#ifdef BUILD_TAPE_TAPECTRL
+        case IDM_TAPE_TAPECTRL: /* TOHv4.3 */
+            if ( ! tape_vars.tapectrl_opened ) {
+                e = tapectrl_start_gui_thread (&tape_state,
+                                               &tape_vars,
+                                               tape_vars.tapectrl_allow_resize,
+                                               tape_vars.tapectrl_ui_scale * ( hiresdisplay ? 2.0f : 1.0f));
+                if (TAPE_E_TAPECTRL_THREAD_EXISTS == e) {
+                    e = TAPE_E_OK; /* trap this */
+                } else {
+                    /* It is not really necessary to shut down the entire tape system just because
+                     * the tape control window failed to open. Do it anyway. */
+                    tape_handle_exception (&tape_state,
+                                           &tape_vars,
+                                           e,
+                                           tape_vars.testing_mode & TAPE_TEST_QUIT_ON_EOF,
+                                           tape_vars.testing_mode & TAPE_TEST_QUIT_ON_ERR,
+                                           true);
+                }
+            }
+#endif
+            break;
+        case IDM_TAPE_OPTS_SAVE_UEF_FORCE_117:
+            tape_toggle_force_117(event);
+            break;
+        case IDM_TAPE_OPTS_SAVE_UEF_FORCE_112:
+            tape_toggle_force_112(event);
+            break;
+        case IDM_TAPE_OPTS_SAVE_UEF_SUPPRESS_ORGN_ON_APPEND:
+            tape_toggle_append_origin(event);
+            break;
+        case IDM_TAPE_OPTS_SAVE_WAV_PHASE_SHIFT:
+            tape_toggle_wav_use_phase_shift(event);
+            break;
+        case IDM_TAPE_OPTS_LOAD_FILTER_PHANTOMS:
+            tape_toggle_filter_phantoms(event);
             break;
         case IDM_ROMS_LOAD:
             rom_load(event);
@@ -1390,6 +1923,11 @@ void gui_allegro_event(ALLEGRO_EVENT *event)
             break;
         case IDM_SOUND_TAPE:
             sound_tape = !sound_tape;
+            tapenoise_activated_hook();
+            break;
+        /* TOHv2: */
+        case IDM_SOUND_TAPE_RELAY:
+            sound_tape_relay = !sound_tape_relay;
             break;
         case IDM_SOUND_FILTER:
             sound_filter = !sound_filter;
@@ -1508,3 +2046,4 @@ void gui_allegro_event(ALLEGRO_EVENT *event)
             break;
     }
 }
+

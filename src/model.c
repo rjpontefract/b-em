@@ -258,7 +258,12 @@ void model_loadcfg(void)
 }
 
 void model_check(void) {
-    const int defmodel = 3;
+    int defmodel = 3;
+
+    // BUGFIX: defend against model 3 not being defined in cfgfile
+    if (defmodel >= model_count) {
+        defmodel = model_count-1;
+    }
 
     if (curmodel < 0 || curmodel >= model_count) {
         log_warn("No model #%d, using #%d (%s) instead", curmodel, defmodel, models[defmodel].name);

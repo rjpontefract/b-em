@@ -17,6 +17,8 @@
 #include "6502.h"
 #include "keyboard.h"
 #include "debugger_symbols.h"
+#include "sysacia.h"
+#include "tapeseek.h"
 
 #include <allegro5/allegro_primitives.h>
 
@@ -92,6 +94,21 @@ static uint8_t find_breakpoint_by_address_or_index (cpu_debug_t *cpu,
                                                     char *arg,
                                                     breakpoint **out_found,
                                                     breakpoint **out_prev);
+/* TOHv4.3 */
+static int debug_tapeseek_time (char * const iptr,
+                                int const len,
+                                tape_state_t * const ts,
+                                tape_vars_t * const tv);
+static int debug_tapeseek_percent (const char * const iptr,
+                                   tape_state_t * const ts,
+                                   tape_vars_t * const tv);
+static int debug_tapeseek (const char * const iptr,
+                           tape_state_t * const ts,
+                           tape_vars_t * const tv);
+
+static int debug_taperec (const char * const iptr);
+static void debug_tape_ls_uef (const tape_state_t * const ts); /* TOHv4.3-a4 */
+static void debug_tape_ls_tibet (tape_state_t * const ts); /* TOHv4.3-a4 */
 
 static void close_trace(const char *why)
 {
@@ -497,6 +514,11 @@ static const char helptext[] =
     "    symlist    - list all symbols\n"
     "    swiftsym f - load symbols in swift format from file f\n"
     "    simplesym f - load symbols in name=value format from file f\n"
+    "    taperec m  - switch tape record-and-append mode 'on' or 'off'\n" /* TOH */
+    "    tapeseek t - seek to tape time ([h:][mm:]ss.sss, or xx.x%)\n"    /* TOHv4.3 */
+    "    tapeeject  - eject currently-loaded tape\n"                      /* TOHv4.3 */
+    "    tapelsuef  - if UEF loaded, list its chunk information\n"        /* TOHv4.3-a4 */
+    "    tapelstbt  - if TIBET loaded, list its span information\n"        /* TOHv4.3-a4 */
     "    trace fn   - trace disassembly/registers to file, close file if no fn\n"
     "    trange s e - trace the range s to e (replaces tracing everything)\n"
     "    vrefresh t - extra video refresh on entering debugger.  t=on or off\n"
@@ -607,11 +629,10 @@ static void print_registers(cpu_debug_t *cpu) {
 }
 
 static uint32_t parse_address_or_symbol(cpu_debug_t *cpu, const char *arg, const char **endret) {
-
-    uint32_t a;
-    //first see if there is a symbol
-    if (symbol_find_by_name(cpu->symbols, arg, &a, endret))
-        return a;
+    uint32_t addr;
+    // first see if there is a symbol
+    if (symbol_find_by_name(cpu->symbols, arg, &addr, endret))
+        return addr;
     return cpu->parse_addr(cpu, arg, endret);
 }
 
@@ -1382,6 +1403,8 @@ static void debug_trange(cpu_debug_t *cpu, char *iptr)
         debug_outf("missing address");
 }
 
+#include "tape.h"
+
 void debugger_do(cpu_debug_t *cpu, uint32_t addr)
 {
     uint32_t next_addr;
@@ -1681,6 +1704,16 @@ void debugger_do(cpu_debug_t *cpu, uint32_t addr)
                     debug_tracecmd(cpu, iptr);
                 else if (!strncmp(cmd, "trange", cmdlen))
                     debug_trange(cpu, iptr);
+                else if (!strncmp(cmd, "tapeseek", cmdlen)) /* TOHv4.3 */
+                    debug_tapeseek(iptr, &tape_state, &tape_vars);
+                else if (!strncmp(cmd, "tapeeject", cmdlen)) /* TOHv4.3 */
+                    tape_ejected_by_user(&tape_state, &tape_vars, &sysacia);
+                else if (!strncmp(cmd, "tapelsuef", cmdlen)) /* TOHv4.3-a4 */
+                    debug_tape_ls_uef(&tape_state);
+                else if (!strncmp(cmd, "tapelstbt",cmdlen)) /* TOHv4.3-a4 */
+                    debug_tape_ls_tibet(&tape_state);
+                else if (!strncmp(cmd, "taperec", cmdlen)) /* TOHv4.3 */
+                    debug_taperec(iptr);
                 else
                     badcmd = true;
                 break;
@@ -1743,6 +1776,261 @@ void debugger_do(cpu_debug_t *cpu, uint32_t addr)
 
     }
 }
+
+#include "tape2.h"
+#include "tapectrl.h"
+#include "tape.h"
+#include "gui-allegro.h"
+
+/* TOHv4.3-a4 */
+static void debug_tape_ls_uef (const tape_state_t * const ts) {
+    int32_t i;
+    const char *hdr;
+    if (TAPE_FILETYPE_BITS_NONE == ts->filetype_bits) {
+        debug_outf("No tape is loaded.\n");
+        return;
+    } else if ( ! (ts->filetype_bits & TAPE_FILETYPE_BITS_UEF) ) {
+        debug_outf("Tape has no UEF representation!\n");
+        return;
+    }
+    hdr = "\n  # | Type| Len | Start |  Dur. |\n"
+            "    |     |     |~s/1202|~s/1202|\n\n";
+    for (i=0; i < ts->uef.num_chunks; i++) {
+        uef_chunk_t *uc;
+        uc = ts->uef.chunks + i;
+        if (!(i%100)) { debug_outf(hdr); }
+        debug_outf("%4d|&%4x|%5u|%7d|%7d|\n",
+                   i,
+                   uc->type,
+                   uc->len,
+                   uc->elapsed.start_1200ths,
+                   uc->elapsed.pos_1200ths);
+    }
+
+}
+
+
+static void debug_tape_ls_tibet (tape_state_t * const ts) {
+    int e;
+    uint32_t u, num_spans;
+    const char *hdr;
+    tibet_t *t;
+    if (TAPE_FILETYPE_BITS_NONE == ts->filetype_bits) {
+        debug_outf("No tape is loaded.\n");
+        return;
+    } else if ( ! (ts->filetype_bits & TAPE_FILETYPE_BITS_TIBET) ) {
+        debug_outf("Tape has no TIBET representation!\n");
+        return;
+    }
+    t = &(ts->tibet);
+    e = tibet_get_num_spans(t, &num_spans);
+    if (TAPE_E_OK != e) { return; }
+    hdr = "\n  # | Type | Start |  Dur. |\n"
+            "    |      | s/1202| s/1202|\n\n";
+    for (u=0; u < num_spans; u++) {
+        char type;
+        const char *type_s;
+        tape_interval_t iv;
+        type=0;
+        type_s = NULL;
+        if (!(u%100)) { debug_outf(hdr); }
+        e = tibet_get_type_for_span(t, u, &type);
+        if (TAPE_E_OK != e) { return; }
+        e = tibet_get_time_interval_for_span(t, u, &iv);
+        if (TAPE_E_OK != e) { return; }
+        if (TIBET_SPAN_SILENT==type) {
+            type_s = "silent";
+        } else if (TIBET_SPAN_LEADER==type) {
+            type_s = "leader";
+        } else if (TIBET_SPAN_DATA==type) {
+            type_s = " data ";
+        }
+        debug_outf("%4u|%6s|%7d|%7d|\n",
+                   u,
+                   type_s,
+                   iv.start_1200ths,
+                   iv.pos_1200ths);
+    }
+}
+
+static int debug_taperec (const char * const iptr) {
+    bool b;
+    bool tapectrl_opened;
+#ifdef BUILD_TAPE_TAPECTRL
+    int e;
+    int32_t pos;
+#endif
+    if ((strcmp("on",iptr)) && (strcmp("off",iptr))) {
+        debug_out("Mode must be on or off\n",23);
+        return TAPE_E_DEBUG_BAD_TAPEREC;
+    }
+    b = ('f'==iptr[1])?false:true;
+    tapectrl_opened = false;
+#ifdef BUILD_TAPE_TAPECTRL
+    pos=0;
+    if (tape_vars.tapectrl_opened) { /* triage, mainthread-only flag */
+        e = tape_get_duration_1200ths(&tape_state, &pos);
+        if (TAPE_E_OK != e) { return e; }
+        /* actual tapectrl.display will be checked under lock: */
+        tapectrl_set_record (&(tape_vars.tapectrl), b, pos);
+    }
+#endif
+    gui_set_record_mode(b);
+    return tape_set_record_activated (&tape_state,
+                                      &tape_vars,
+                                      &sysacia,
+                                      b,
+                                      tapectrl_opened);
+}
+
+
+static int debug_tapeseek (const char * const iptr,
+                           tape_state_t * const ts,
+                           tape_vars_t * const tv) {
+
+    int e;
+    size_t len;
+    int leni;
+    char *p;
+
+    e = TAPE_E_OK;
+
+    len = strlen(iptr);
+    if ((0==len)||(len>256)) {
+        debug_out("Seek time was bad!\n", 19);
+        return TAPE_E_DEBUG_BAD_TAPESEEK;
+    }
+
+    leni = 0x7fffffff & len;
+
+    p = malloc(leni+1);
+    if (NULL==p) {
+        debug_out("Malloc failure\n", 15);
+        return TAPE_E_MALLOC;
+    }
+    memcpy(p,iptr,leni+1);
+
+    if ('%'==p[leni-1]) {
+        p[leni-1] = '\0';
+        e = debug_tapeseek_percent(p, ts, tv);
+        p[leni-1] = '%';
+    } else {
+        e = debug_tapeseek_time(p, leni, ts, tv);
+    }
+    free(p);
+
+    return e;
+}
+
+#include "tapectrl.h" /* TOHv4.3 */
+
+/* TOHv4.3 */
+static int debug_tapeseek_percent (const char   * const iptr,
+                                   tape_state_t * const ts,
+                                   tape_vars_t  * const tv) {
+    double d;
+    char *p;
+    d = strtod(iptr, &p);
+    if ((NULL == p) || (p == iptr)) {
+        debug_out("Seek fraction was bad\n",22);
+        return TAPE_E_DEBUG_BAD_TAPESEEK;
+    }
+    if (d>100.0) { d=100.0; }
+    if (d<0.0)   { d=0.0;   }
+    /* OK. Push out a pair of synthetic seek messages to both the main thread
+       and the tapectrl GUI thread. */
+    return tape_seek_for_debug (ts, tv, d / 100.0);
+}
+
+#include "gui-allegro.h"
+
+
+
+
+static int debug_tapeseek_time (char * const iptr,
+                                int const len,
+                                tape_state_t * const ts,
+                                tape_vars_t * const tv) {
+
+    double secs;
+    int i,h,m,e,seps;
+    int32_t duration_1200ths;
+
+    for (i=len-1, secs=-1.0, m=-1, h=-1, e=TAPE_E_OK, seps=0;
+         (i>-2) && (seps<4);
+         i--) {
+
+        char c,*next;
+
+        c = '\0';
+        if (i>=0) { c = iptr[i]; }
+
+        if ((-1==i)||(':'==c)) {
+            seps++; /* start of segment, or start of string */
+        } else {
+            continue; /* pass over digits */
+        }
+
+        if ( (-1 != i) && ( (!isdigit(c)) && (c!=':') && (c!='.') ) ) {
+            seps = 8;
+            break;
+        }
+
+        next = iptr+i+1;
+
+        if (1==seps) {
+            if (i==(len-1)) {
+                seps = 5; /* empty segment, throw error */
+            } else {
+                secs = atof(next);
+                if (secs < 0.0)  { secs = 0.0; }  /* should be impossible */
+                if (i>-1) { iptr[i]='\0'; } /* null-terminate the next segment (minutes) */
+            }
+        } else if (2==seps) {
+            if ((secs > 60.0) || (((*next)=='\0')&&(i<(len-1)))) {
+                seps = 6; /* throw error */
+            } else {
+                m = atoi(next);
+                if (m < 0) { m=0; } /* should be impossible */
+                if (i>-1) { iptr[i]='\0'; } /* null-terminate the next segment (hours) */
+            }
+        } else if (3==seps) {
+            if ((m > 60) || ((*next)=='\0')) {
+                seps = 7; /* throw error */
+            } else {
+                h = atoi(next);
+                if (h < 0) { h=0; } /* should be impossible */
+                if (h > 10) { seps = 8; } /* throw error */
+            }
+        }
+    }
+
+    if (seps>3) {
+        debug_out("Bad time\n",9);
+        return TAPE_E_DEBUG_BAD_TAPESEEK;
+    }
+
+    if (m>0) { secs+=(m*60);    }
+    if (h>0) { secs+=(h*60*60); }
+    
+    /* hack: make sure time displayed rounds up */
+    secs += 0.001;
+
+    secs *= TAPE_1200_HZ;
+
+    duration_1200ths = 0;
+    e = tape_get_duration_1200ths (ts, &duration_1200ths);
+    if (TAPE_E_OK != e) { return e; }
+
+    if (secs >= (double) duration_1200ths) {
+        debug_out("Time exceeds duration\n",22);
+        return TAPE_E_DEBUG_BAD_TAPESEEK;
+    }
+
+    return tape_seek_for_debug (ts, tv, (secs / (double) duration_1200ths));
+
+}
+
 
 static void hit_point(cpu_debug_t *cpu, uint32_t addr, uint32_t value, const char *enter, const char *desc)
 {
