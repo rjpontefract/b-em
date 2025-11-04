@@ -1973,7 +1973,7 @@
     $extra_args = " -tapetest $tapetest_bits $extra_args";
 
     $cl = B_EM_EXE.
-          " -sp9 ".
+          " -sp4 ".
           "-exec ".PATH_DEBUGGER_EXEC_TMPFILE." ".
           "-cfg $cfgfile ". // TTv6, for TOHv4.3
           " -debug $extra_args"; // -bp-shutdown
