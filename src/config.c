@@ -197,6 +197,7 @@ void config_load(ALLEGRO_PATH *path, uint8_t doing_testing)
     sound_dac        = get_config_bool("sound", "snddac",        false);
     sound_ddnoise    = get_config_bool("sound", "sndddnoise",    true);
     sound_tape       = get_config_bool("sound", "sndtape",       false);
+    sound_tape_relay = get_config_bool("sound", "sndtaperelay",  false);
     sound_filter     = get_config_bool("sound", "soundfilter",   true);
     sound_paula      = get_config_bool("sound", "soundpaula",    false);
     music5000_fno    = get_config_int("sound", "music5000_filter", 0);
@@ -363,6 +364,7 @@ void config_save(void)
         set_config_bool("sound", "snddac",      sound_dac);
         set_config_bool("sound", "sndddnoise",  sound_ddnoise);
         set_config_bool("sound", "sndtape",     sound_tape);
+        set_config_bool("sound", "sndtaperelay", sound_tape_relay);
         set_config_bool("sound", "soundfilter", sound_filter);
         set_config_bool("sound", "soundpaula",  sound_paula);
         set_config_int("sound", "music5000_filter", music5000_fno);
