@@ -21,6 +21,9 @@
 
 #define inline __inline
 
+#define pclose _pclose
+#define popen  _popen
+
 #define strcasecmp  _stricmp
 #define strncasecmp _strnicmp
 
