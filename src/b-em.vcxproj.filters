@@ -57,9 +57,6 @@
     <ClInclude Include="arm.h">
       <Filter>Source Files</Filter>
     </ClInclude>
-    <ClInclude Include="bbctext.h">
-      <Filter>Source Files</Filter>
-    </ClInclude>
     <ClInclude Include="b-em.h">
       <Filter>Source Files</Filter>
     </ClInclude>
@@ -373,6 +370,33 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="fullscreen.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="mc68000tube.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="mmb.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="musahi\m68kops.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="musahi\m68kcpu.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="ml675001.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="armulator.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="textsave.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="musahi\m68k.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="musahi\m68kconf.h">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>
@@ -728,6 +752,24 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="fullscreen.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="mc68000tube.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="mmb.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="musahi\m68kops.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="musahi\m68kcpu.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="musahi\m68kdasm.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="textsave.c">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>
