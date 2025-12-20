@@ -57,33 +57,18 @@ static void log_common(const log_level_t *ll, unsigned dest, char *msg, size_t l
             strftime(tmstr, sizeof(tmstr), "%d/%m/%Y %H:%M:%S", localtime(&now));
             last = now;
         }
-#ifdef WIN32
-        _lock_file(log_fp);
-        fprintf(log_fp, "%s %s ", tmstr, ll->name);
-        _fwrite_nolock(msg, len, 1, log_fp);
-        _fputc_nolock('\n', log_fp);
-        _fflush_nolock(log_fp);
-        _unlock_file(log_fp);
-    }
-    if (dest & LOG_DEST_STDERR) {
-        _lock_file(stderr);
-        _fwrite_nolock(msg, len, 1, stderr);
-        _fputc_nolock('\n', stderr);
-        _unlock_file(stderr);
-#else
         flockfile(log_fp);
         fprintf(log_fp, "%s %s ", tmstr, ll->name);
-        fwrite(msg, len, 1, log_fp);
+        fwrite_unlocked(msg, len, 1, log_fp);
         putc_unlocked('\n', log_fp);
-        fflush(log_fp);
+        fflush_unlocked(log_fp);
         funlockfile(log_fp);
     }
     if (dest & LOG_DEST_STDERR) {
         flockfile(stderr);
-        fwrite(msg, len, 1, stderr);
+        fwrite_unlocked(msg, len, 1, stderr);
         putc_unlocked('\n', stderr);
         funlockfile(stderr);
-#endif
     }
     if (dest & LOG_DEST_MSGBOX) {
         ALLEGRO_DISPLAY *display = al_get_current_display();
