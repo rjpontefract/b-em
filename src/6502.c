@@ -20,6 +20,7 @@
 #include "scsi.h"
 #include "sid_b-em.h"
 #include "sound.h"
+#include "speech.h"
 #include "sysacia.h"
 #include "tape.h"
 #include "tube.h"
@@ -237,6 +238,7 @@ static void polltime(int c)
     via_poll(&uservia, c);
     video_poll(c, 1);
     sound_poll(c);
+    speech_poll(c);
     music5000_poll(c);
     stopwatch += c;
     otherstuffcount -= c;

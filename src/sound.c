@@ -10,11 +10,13 @@
 #include "uservia.h"
 #include "music5000.h"
 #include "paula.h"
+#include "speech.h"
 
 bool sound_internal = false, sound_beebsid = false, sound_dac = false;
 bool sound_ddnoise = false, sound_tape = false;
 bool sound_music5000 = false, sound_filter = false;
 bool sound_paula = false;
+bool sound_speech = false;
 
 static ALLEGRO_VOICE *voice;
 static ALLEGRO_MIXER *mixer;
@@ -161,6 +163,12 @@ void sound_poll(int cycles)
 
         if (sound_internal)
             sn_fillbuf(&sound_buffer[sound_sn_pos], 1);
+
+        {
+            int16_t sp = speech_mix();
+            if (sound_speech)
+                sound_buffer[sound_sn_pos] += sp << 1;
+        }
 
         sound_sn_pos++;
 

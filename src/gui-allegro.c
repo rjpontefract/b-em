@@ -256,7 +256,7 @@ static ALLEGRO_MENU *create_rom_menu(void)
 static void update_rom_menu(void)
 {
     ALLEGRO_MENU *menu = rom_menu;
-    
+
     for (int slot = ROM_NSLOT-1; slot >= 0; slot--) {
         char label[ROM_LABEL_LEN];
         gen_rom_label(slot, label);
@@ -459,6 +459,7 @@ static ALLEGRO_MENU *create_sound_menu(void)
     add_checkbox_item(menu, "Disc drive noise",      IDM_SOUND_DDNOISE,   sound_ddnoise);
     add_checkbox_item(menu, "Tape noise",            IDM_SOUND_TAPE,      sound_tape);
     add_checkbox_item(menu, "Internal sound filter", IDM_SOUND_FILTER,    sound_filter);
+    add_checkbox_item(menu, "Speech",                IDM_SOUND_SPEECH,    sound_speech);
     sub = al_create_menu();
     add_radio_set(sub, wave_names, IDM_WAVE, curwave);
     al_append_menu_item(menu, "Internal waveform", 0, 0, NULL, sub);
@@ -1172,7 +1173,7 @@ static void toggle_music5000(void)
         sound_music5000 = true;
         music5000_init(emuspeed);
     }
-}    
+}
 
 static const char all_dext[] = "*.ssd;*.dsd;*.img;*.adf;*.ads;*.adm;*.adl;*.sdd;*.ddd;*.fdi;*.imd;*.hfe;"
                                "*.SSD;*.DSD;*.IMG;*.ADF;*.ADS;*.ADM;*.ADL;*.SDD;*.DDD;*.FDI;*.IMD;*.HFE";
@@ -1387,6 +1388,9 @@ void gui_allegro_event(ALLEGRO_EVENT *event)
             break;
         case IDM_SOUND_FILTER:
             sound_filter = !sound_filter;
+            break;
+        case IDM_SOUND_SPEECH:
+            sound_speech = !sound_speech;
             break;
         case IDM_WAVE:
             curwave = radio_event_simple(event, curwave);

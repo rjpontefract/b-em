@@ -107,7 +107,7 @@ static const struct coeffs speech_coeff =
 };
 
 static bool speech_initialised;
-static int speech_mix_frac;    /* fractional position for 8kHz→125kHz resampling */
+static int speech_mix_frac;       /* fractional position for 8kHz→125kHz resampling */
 static int16_t speech_mix_sample; /* most recent TMS5220 output sample */
 static uint8_t *speech_phroms;
 static uint8_t *speech_phrom;
@@ -128,7 +128,7 @@ static uint16_t speech_previous_energy; /* needed for lattice filter to match pa
 static uint8_t speech_subcycle;         /* contains the current subcycle for a given PC: 0 is A' (only used on SPKSLOW mode on 51xx), 1 is A, 2 is B */
 static uint8_t speech_subc_reload;      /* contains 1 for normal speech, 0 when SPKSLOW is active */
 static uint8_t speech_PC;               /* current parameter counter (what param is being interpolated), ranges from 0 to 12 */
-/* NOTE: the interpolation period counts 1,2,3,4,5,6,7,0 for divide by 8,8,8,4,4,2,2,1 */
+                                        /* NOTE: the interpolation period counts 1,2,3,4,5,6,7,0 for divide by 8,8,8,4,4,2,2,1 */
 static uint8_t speech_IP;               /* the current interpolation period */
 static bool speech_inhibit;             /* If 1, interpolation is inhibited until the DIV1 period */
 static bool speech_uv_zpar;             /* If 1, zero k5 thru k10 coefficients */

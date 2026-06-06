@@ -102,6 +102,7 @@ b_em_SOURCES = \
 	serial.c \
 	sn76489.c \
 	sound.c \
+	speech.c \
 	sysacia.c \
 	sysvia.c \
 	tape.c \

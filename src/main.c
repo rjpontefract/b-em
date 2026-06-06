@@ -44,6 +44,7 @@
 #include "serial.h"
 #include "sid_b-em.h"
 #include "sn76489.h"
+#include "speech.h"
 #include "sysacia.h"
 #include "tape.h"
 #include "tapecat-allegro.h"
@@ -140,6 +141,7 @@ void main_reset()
     sid_reset();
     music4000_reset();
     music5000_reset();
+    speech_reset();
     paula_reset();
     sn_init();
     if (curtube != -1) tubes[curtube].cpu->reset();
@@ -467,6 +469,7 @@ void main_init(int argc, char *argv[])
     sid_init();
     sid_settype(sidmethod, cursid);
     music5000_init(emu_speed_normal);
+    speech_init();
     paula_init();
     ddnoise_init();
     tapenoise_init(queue);
@@ -598,6 +601,7 @@ void main_key_break(void)
     wd1770_reset();
     sid_reset();
     music5000_reset();
+    speech_reset();
     cmos_reset();
     paula_reset();
 
@@ -817,6 +821,7 @@ void main_close()
     ide_close();
     vdfs_close();
     music5000_close();
+    speech_close();
     ddnoise_close();
     tapenoise_close();
     tape_free();

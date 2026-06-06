@@ -19,6 +19,7 @@ extern size_t buflen_m5;
 extern bool sound_internal, sound_beebsid, sound_dac;
 extern bool sound_ddnoise, sound_tape;
 extern bool sound_music5000, sound_filter, sound_paula;
+extern bool sound_speech;
 
 void sound_init(void);
 void sound_poll(int cycles);
@@ -34,7 +35,7 @@ typedef struct {
 } sound_rec_t;
 
 extern sound_rec_t sound_rec;
-    
+
 bool sound_start_rec(sound_rec_t *rec, const char *filename);
 void sound_stop_rec(sound_rec_t *rec);
 
