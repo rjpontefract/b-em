@@ -70,6 +70,13 @@ void sn_fillbuf(int16_t *buffer, int len)
         int c, d;
         static int sidcount = 0;
         uint8_t sdb_data;
+        
+#ifdef BUILD_TAPE_SANITY
+        if (len>=BUFLEN_SO) {
+          log_warn("sn_fillbuf: len (%d) >= BUFLEN_SO (%d)\n", len, BUFLEN_SO);
+          return;
+        }
+#endif
 
         if (sysvia_get_sn_data(&sdb_data))
                 sn_write(sdb_data);
@@ -79,6 +86,20 @@ void sn_fillbuf(int16_t *buffer, int len)
                 for (c = 0; c < 3; c++)
                 {
                         c++;
+//~ printf("c=%d\n", c);
+//~ printf("sn_vol=%p\n", sn_vol);
+//~ printf("sn_stat=%p\n", sn_stat);
+//~ printf("sn_vol[c]=%d\n", sn_vol[c]);
+//~ printf("sn_stat[c]=%d\n", sn_stat[c]);
+//~ printf("curwave=%d\n", curwave);
+//~ printf("snwaves=%p\n", snwaves);
+//~ printf("snwaves[curwave][sn_stat[c]] = %d\n", snwaves[curwave][sn_stat[c]]);
+//~ printf("volslog = %p\n", volslog);
+//~ printf("volslog[sn_vol[c]] = %lf\n", volslog[sn_vol[c]]);
+//~ printf("d=%d\n", d);
+//~ printf("buffer=%p\n", buffer);
+//~ printf("buffer[d] = %d\n", buffer[d]);
+//~ printf("sn_latch = %p\n", sn_latch);
                         if (sn_latch[c] > 256) buffer[d] += (int16_t) (snwaves[curwave][sn_stat[c]] * volslog[sn_vol[c]]);
                         else                   buffer[d] += (int16_t) (volslog[sn_vol[c]] * 127);
 

@@ -10,11 +10,14 @@
 #include "uservia.h"
 #include "music5000.h"
 #include "paula.h"
+#include "tapenoise.h"
 
 bool sound_internal = false, sound_beebsid = false, sound_dac = false;
-bool sound_ddnoise = false, sound_tape = false;
+bool sound_ddnoise = false; /*, sound_tape = false;*/
+float sound_tape_volume_fraction = TAPENOISE_VOLUME_DEFAULT; /* TOHv4.4 */
 bool sound_music5000 = false, sound_filter = false;
 bool sound_paula = false;
+bool sound_tape_relay = false; /* TOHv2 */
 
 static ALLEGRO_VOICE *voice;
 static ALLEGRO_MIXER *mixer;

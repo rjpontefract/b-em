@@ -147,6 +147,8 @@ ALLEGRO_COLOR get_config_colour(const char *sect, const char *key, ALLEGRO_COLOR
     return cdefault;
 }
 
+#include "tapenoise.h" /* TOHv4.4 */
+
 void config_load(ALLEGRO_PATH *path)
 {
     if (path || (path = find_cfg_file("b-em", ".cfg"))) {
@@ -172,8 +174,8 @@ void config_load(ALLEGRO_PATH *path)
         mmb_fn = get_config_strdup("disc", "mmb");
     if (!mmccard_fn)
         mmccard_fn = get_config_strdup("disc", "mmcard");
-    if (!tape_fn)
-        tape_fn = get_config_path("tape", "tape");
+    if ( /*( ! doing_testing ) &&*/ !tape_vars.load_filename) /* TOHv4.2 merge */
+        tape_vars.load_filename = get_config_path("tape", "tape");
 
     al_remove_config_key(bem_cfg, "", "video_resize");
     al_remove_config_key(bem_cfg, "", "tube6502speed");
@@ -194,7 +196,13 @@ void config_load(ALLEGRO_PATH *path)
     sound_music5000  = get_config_bool("sound", "sndmusic5000",  false);
     sound_dac        = get_config_bool("sound", "snddac",        false);
     sound_ddnoise    = get_config_bool("sound", "sndddnoise",    true);
-    sound_tape       = get_config_bool("sound", "sndtape",       false);
+    /* TOHv4.4 */
+    sound_tape_volume_fraction = ((float) get_config_int("sound", "sndtape_vol_1000", TAPENOISE_VOLUME_DEFAULT * 1000)) / 1000.0f;
+    if (sound_tape_volume_fraction > 1.0f) {
+        sound_tape_volume_fraction = 1.0f;
+    } else if (sound_tape_volume_fraction < 0.0f) {
+        sound_tape_volume_fraction = 0.0f;
+    }
     sound_filter     = get_config_bool("sound", "soundfilter",   true);
     sound_paula      = get_config_bool("sound", "soundpaula",    false);
     music5000_fno    = get_config_int("sound", "music5000_filter", 0);
@@ -232,8 +240,17 @@ void config_load(ALLEGRO_PATH *path)
 
     mode7_fontfile   = get_config_string("video", "mode7font", "saa5050");
 
-    if (!fasttape && get_config_bool("tape", "fasttape", false))
-        fasttape = true;
+    /* TOHv4.2 merge */
+    if ( ! tape_vars.overclock && get_config_bool("tape", "fasttape", false))
+        tape_vars.overclock = true;
+        
+    /* TOHv4.4 */
+    tape_vars.strip_silence_and_leader              = get_config_bool("tape", "toh_fasttape2",       false);
+    tape_vars.save_always_117                       = get_config_bool("tape", "toh_force117",        false); 
+    tape_vars.save_prefer_112                       = get_config_bool("tape", "toh_prefer112",       false);    
+    tape_vars.save_do_not_generate_origin_on_append = get_config_bool("tape", "toh_noappendorigin",  false);
+    tape_vars.permit_phantoms                       = get_config_bool("tape", "toh_allowphantoms",   false);
+    tape_vars.wav_use_phase_shift                   = get_config_bool("tape", "toh_wavcosine",       false);
 
     scsi_enabled     = get_config_bool("disc", "scsienable", 0);
     ide_enable       = get_config_bool("disc", "ideenable", 0);
@@ -341,9 +358,10 @@ void config_save(void)
         set_config_string("disc", "mmccard", mmccard_fn);
         set_config_bool("disc", "defaultwriteprotect", defaultwriteprot);
 
-        if (tape_loaded)
-            al_set_config_value(bem_cfg, "tape", "tape", al_path_cstr(tape_fn, ALLEGRO_NATIVE_PATH_SEP));
-        else
+        /* TOHv3, TOHv4.2 */
+        if (TAPE_IS_LOADED(tape_state.filetype_bits)) { /* TOHv4: now a macro */
+            al_set_config_value(bem_cfg, "tape", "tape", al_path_cstr(tape_vars.load_filename, ALLEGRO_NATIVE_PATH_SEP));
+        } else
             al_remove_config_key(bem_cfg, "tape", "tape");
 
         set_config_bool(NULL, "autopause", autopause);
@@ -358,7 +376,7 @@ void config_save(void)
         set_config_bool("sound", "sndmusic5000",sound_music5000);
         set_config_bool("sound", "snddac",      sound_dac);
         set_config_bool("sound", "sndddnoise",  sound_ddnoise);
-        set_config_bool("sound", "sndtape",     sound_tape);
+        set_config_int("sound", "sndtape_vol_1000", (int) (0.5f + (sound_tape_volume_fraction * 1000.0f))); /* TOHv4.4 */
         set_config_bool("sound", "soundfilter", sound_filter);
         set_config_bool("sound", "soundpaula",  sound_paula);
         set_config_int("sound", "music5000_filter", music5000_fno);
@@ -385,7 +403,18 @@ void config_save(void)
         set_config_int("video", "ledvisibility", vid_ledvisibility);
         set_config_string("video", "mode7font", mode7_fontfile);
 
-        set_config_bool("tape", "fasttape", fasttape);
+        /* overclocked mode makes the tape system unreliable, so this
+         * build switch will stop it being saved to the configuration file */
+#ifndef BUILD_TAPE_NO_SAVE_FASTTAPE
+        set_config_bool("tape", "fasttape", tape_vars.overclock);
+#endif
+        /* TOHv4.4: */
+        set_config_bool("tape", "toh_fasttape2",       tape_vars.strip_silence_and_leader);
+        set_config_bool("tape", "toh_force117",        tape_vars.save_always_117);
+        set_config_bool("tape", "toh_prefer112",       tape_vars.save_prefer_112);
+        set_config_bool("tape", "toh_noappendorigin",  tape_vars.save_do_not_generate_origin_on_append);
+        set_config_bool("tape", "toh_allowphantoms",   tape_vars.permit_phantoms);
+        set_config_bool("tape", "toh_wavcosine",       tape_vars.wav_use_phase_shift);
 
         set_config_bool("disc", "scsienable", scsi_enabled);
         set_config_bool("disc", "ideenable", ide_enable);

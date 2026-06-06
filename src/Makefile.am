@@ -105,8 +105,15 @@ b_em_SOURCES = \
 	sysacia.c \
 	sysvia.c \
 	tape.c \
+	tapectrl.c \
+	tapeseek.c \
+	taperead.c \
+	tapewrite.c \
+    tape-interval.c \
+	tape-io.c \
 	tapecat-allegro.c \
 	tapenoise.c \
+	tibet.c \
     pdp11/pdp11.c \
     pdp11/pdp11_debug.c \
     textsave.c \
