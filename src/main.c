@@ -763,6 +763,12 @@ void main_run()
             case ALLEGRO_EVENT_DISPLAY_RESIZE:
                 video_update_window_size(&event);
                 break;
+            case ALLEGRO_EVENT_DISPLAY_HALT_DRAWING:
+                al_acknowledge_drawing_halt(event.display.source);
+                break;
+            case ALLEGRO_EVENT_DISPLAY_RESUME_DRAWING:
+                al_acknowledge_drawing_resume(event.display.source);
+                break;
             case ALLEGRO_EVENT_DISPLAY_SWITCH_OUT:
                 /* bodge for when OUT events immediately follow an IN event */
                 if ((event.any.timestamp - last_switch_in) > 0.01) {
