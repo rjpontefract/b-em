@@ -6,6 +6,7 @@
 #include "6502.h"
 #include "adc.h"
 #include "disc.h"
+#include "econet.h"
 #include "i8271.h"
 #include "ide.h"
 #include "mem.h"
@@ -457,11 +458,24 @@ static uint32_t do_readmem(uint32_t addr)
                 return serial_read((uint16_t)addr);
 
         case 0xFE18:
+                if (MASTER)
+                    return adc_read((uint16_t)addr);
+                else if (EconetEnabled) {
+                    EconetNMIenabled = false;
+                    return econet_read_station();
+                }
+                else
+                    return mmccard_read();
+
         case 0xFE1C:
                 if (MASTER)
                         return adc_read((uint16_t)addr);
                 else
                     return mmccard_read();
+
+        case 0xFE20:
+                if (!MASTER && EconetEnabled)
+                    EconetNMIenabled = true;
                 break;
 
         case 0xFE24:
@@ -480,8 +494,19 @@ static uint32_t do_readmem(uint32_t addr)
                         return acccon;
                 break;
 
+        case 0xFE38:
+            if (MASTER && EconetEnabled) {
+                log_debug("Econet: FE38 read (NMI disable) PC=%04X s1=%02X s2=%02X ctl1=%02X ctl2=%02X", pc, ADLC.status1, ADLC.status2, ADLC.control1, ADLC.control2);
+                EconetNMIenabled = false;
+            }
+            break;
+
         case 0xFE3C:
-            if (integra)
+            if (MASTER && EconetEnabled) {
+                log_debug("Econet: FE3C read (NMI enable) PC=%04X s1=%02X s2=%02X ctl1=%02X ctl2=%02X", pc, ADLC.status1, ADLC.status2, ADLC.control1, ADLC.control2);
+                EconetNMIenabled = true;
+            }
+            else if (integra)
                 return cmos_read_data_integra();
             break;
 
@@ -524,6 +549,18 @@ static uint32_t do_readmem(uint32_t addr)
                 default:
                     return wd1770_read((uint16_t)addr);
             }
+            break;
+
+        case 0xFEA0:
+        case 0xFEA4:
+        case 0xFEA8:
+        case 0xFEAC:
+        case 0xFEB0:
+        case 0xFEB4:
+        case 0xFEB8:
+        case 0xFEBC:
+            if (EconetEnabled)
+                return econet_read_register(addr);
             break;
 
         case 0xFEC0:
@@ -680,6 +717,18 @@ static void write_acccon_master(int val)
     acccon = val;
     vidbank = (val & 1) ? 0x8000 : 0;
 
+    /* ACCCON bit 7 = IRR: writing 1 asserts IRQ (Econet notify mechanism). */
+    if (val & 0x80) {
+        uint8_t old_0d6c = readmem(0x0D6C);
+        uint8_t new_0d6c = old_0d6c & 0x7F;
+        writemem(0x0D6C, new_0d6c);
+        log_warn("ACCCON: IRR set pc=%04X $0D6C %02X->%02X interrupt|=0x40",
+                 pc, old_0d6c, readmem(0x0D6C));
+        interrupt |= 0x040;
+    } else {
+        interrupt &= ~0x040;
+    }
+
     int bank = 0;
     if (val & 8)    /* 8K filing system RAM */
         page_range(ram - 0x3000, 0xc0, 0xe0, MSTAT_RAM);
@@ -792,6 +841,9 @@ static void do_writemem(uint32_t addr, uint32_t val)
                     case 0x022f:
                         buf_cnpv = (buf_cnpv & 0xff) | (val << 8);
                         break;
+                    case 0x0d6c:
+                        log_debug("6502: $0D6C written val=%02X pc=%04X", val, pc);
+                        break;
                 }
                 return;
         }
@@ -883,6 +935,14 @@ static void do_writemem(uint32_t addr, uint32_t val)
                 break;
 
         case 0xFE18:
+                if (MASTER)
+                    adc_write((uint16_t)addr, (uint8_t)val);
+                else if (EconetEnabled)
+                    EconetNMIenabled = false;
+                else
+                    mmccard_write(val);
+                break;
+
         case 0xFE1C:
                 if (MASTER)
                         adc_write((uint16_t)addr, (uint8_t)val);
@@ -971,6 +1031,18 @@ static void do_writemem(uint32_t addr, uint32_t val)
             }
             break;
 
+        case 0xFEA0:
+        case 0xFEA4:
+        case 0xFEA8:
+        case 0xFEAC:
+        case 0xFEB0:
+        case 0xFEB4:
+        case 0xFEB8:
+        case 0xFEBC:
+            if (EconetEnabled)
+                econet_write_register(addr, val);
+            break;
+
         case 0xFEC0:
         case 0xFEC4:
         case 0xFEC8:
@@ -1018,6 +1090,7 @@ int nmi, oldnmi, interrupt, takeint;
  * 0x004: System ACIA
  * 0x008: Tube ULA
  * 0x010: SCSI
+ * 0x040: ACCCON IRR (BBC Master Econet notify).
  * 0x080: Bodge flag.
  * 0x100: Music 2000 ACIA 1
  * 0x200: Music 2000 ACIA 2
@@ -1079,8 +1152,12 @@ static inline uint16_t getsw(void)
 static void otherstuff_poll(void) {
     otherstuffcount += 128;
     acia_poll(&sysacia);
+    if (EconetEnabled)
+        econet_poll();
+    /*
     if (sound_music5000)
         music2000_poll();
+    */
     if (!tapelcount) {
         tape_poll();
         tapelcount = tapellatch;
@@ -4049,6 +4126,8 @@ void m6502_exec(int slice)
                     tubecycle -= whole_cycles;
                     tube_exec();
                 }
+                if (EconetEnabled && econet_state_changed())
+                    econet_poll();
 
                 if (nmi && !oldnmi) {
                         push(pc >> 8);
@@ -5886,6 +5965,8 @@ void m65c02_exec(int slice)
 
                 if (otherstuffcount <= 0)
                     otherstuff_poll();
+                if (EconetEnabled && econet_state_changed())
+                    econet_poll();
                 if (nmi && !oldnmi) {
                         push(pc >> 8);
                         push(pc & 0xFF);

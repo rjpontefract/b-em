@@ -8,6 +8,7 @@
 #include "debugger.h"
 #include "ddnoise.h"
 #include "disc.h"
+#include "econet.h"
 #include "fullscreen.h"
 #include "joystick.h"
 #include "keyboard.h"
@@ -256,7 +257,7 @@ static ALLEGRO_MENU *create_rom_menu(void)
 static void update_rom_menu(void)
 {
     ALLEGRO_MENU *menu = rom_menu;
-    
+
     for (int slot = ROM_NSLOT-1; slot >= 0; slot--) {
         char label[ROM_LABEL_LEN];
         gen_rom_label(slot, label);
@@ -588,6 +589,7 @@ static ALLEGRO_MENU *create_settings_menu(void)
 #endif
     al_append_menu_item(menu, "Keyboard", 0, 0, NULL, create_keyboard_menu());
     al_append_menu_item(menu, "Jim Memory", 0, 0, NULL, create_jim_menu());
+    add_checkbox_item(menu, "Econet",     IDM_ECONET,     EconetEnabled);
     add_checkbox_item(menu, "Auto-Pause", IDM_AUTO_PAUSE, autopause);
     add_checkbox_item(menu, "Mouse (AMX)", IDM_MOUSE_AMX, mouse_amx);
     if (joystick_count > 0)
@@ -1172,7 +1174,7 @@ static void toggle_music5000(void)
         sound_music5000 = true;
         music5000_init(emuspeed);
     }
-}    
+}
 
 static const char all_dext[] = "*.ssd;*.dsd;*.img;*.adf;*.ads;*.adm;*.adl;*.sdd;*.ddd;*.fdi;*.imd;*.hfe;"
                                "*.SSD;*.DSD;*.IMG;*.ADF;*.ADS;*.ADM;*.ADL;*.SDD;*.DDD;*.FDI;*.IMD;*.HFE";
@@ -1473,6 +1475,11 @@ void gui_allegro_event(ALLEGRO_EVENT *event)
             break;
         case IDM_JIM_SIZE:
             mem_jim_setsize(radio_event_simple(event, mem_jim_size));
+            break;
+        case IDM_ECONET:
+            EconetEnabled = !EconetEnabled;
+            if (EconetEnabled)
+                main_key_break();
             break;
         case IDM_AUTO_PAUSE:
             autopause = !autopause;

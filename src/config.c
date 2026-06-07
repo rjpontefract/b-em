@@ -6,6 +6,7 @@
 #include "config.h"
 #include "ddnoise.h"
 #include "disc.h"
+#include "econet.h"
 #include "keyboard.h"
 #include "main.h"
 #include "mem.h"
@@ -352,6 +353,7 @@ void config_save(void)
         set_config_int(NULL, "model", curmodel);
         set_config_int(NULL, "tube", selecttube);
         set_config_int(NULL, "tubespeed", tube_speed_num);
+        set_config_bool(models[curmodel].cfgsect, "econet", EconetEnabled);
 
         set_config_bool("sound", "sndinternal", sound_internal);
         set_config_bool("sound", "sndbeebsid",  sound_beebsid);

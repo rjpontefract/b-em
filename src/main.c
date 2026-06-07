@@ -18,6 +18,7 @@
 #include "ddnoise.h"
 #include "debugger.h"
 #include "disc.h"
+#include "econet.h"
 #include "fdi.h"
 #include "hfe.h"
 #include "gui-allegro.h"
@@ -142,6 +143,7 @@ void main_reset()
     music5000_reset();
     paula_reset();
     sn_init();
+    econet_reset();
     if (curtube != -1) tubes[curtube].cpu->reset();
     else               tube_exec = NULL;
     tube_reset();
@@ -600,6 +602,7 @@ void main_key_break(void)
     music5000_reset();
     cmos_reset();
     paula_reset();
+    econet_reset();
 
     if (curtube != -1)
         tubes[curtube].cpu->reset();
