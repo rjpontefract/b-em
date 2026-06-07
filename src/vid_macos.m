@@ -53,7 +53,7 @@ void vid_macos_resize_init(void)
              object:nil];
 }
 
-float vid_macos_backing_scale(void)
+float vid_macos_display_scale(void)
 {
     if (bem_window)
         return (float)[bem_window backingScaleFactor];

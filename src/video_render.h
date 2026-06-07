@@ -82,7 +82,7 @@ float vid_display_scale(void);
 #ifdef __APPLE__
 extern volatile bool vid_live_resizing;
 void vid_macos_resize_init(void);
-float vid_macos_backing_scale(void);
+float vid_macos_display_scale(void);
 #endif
 
 #endif

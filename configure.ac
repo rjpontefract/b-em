@@ -15,9 +15,7 @@ AC_PROG_CC
 AC_PROG_CXX
 CXXFLAGS="$CXXFLAGS -std=gnu++11"
 AM_PROG_CC_C_O
-case "$host_os" in
-  darwin*) AC_PROG_OBJC ;;
-esac
+AC_PROG_OBJC
 
 # Whether this is a released build or not.
 ISRELEASED="no"

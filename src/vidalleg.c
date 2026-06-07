@@ -249,12 +249,49 @@ static float vid_linux_display_scale(void)
 }
 #endif
 
+#ifdef WIN32
+#include <allegro5/allegro_windows.h>
+
+static float vid_windows_display_scale(void)
+{
+    ALLEGRO_DISPLAY *display;
+    HWND hwnd = NULL;
+    HMODULE user32;
+    UINT dpi = 0;
+
+    /* During initial sizing video_set_window_size() is called from video_init() 
+     * before al_create_display() so there is no display yet.
+     * Fall through to the GetDeviceCaps() path below with a NULL HWND,
+     * which queries the primary monitor via the screen DC. 
+     */
+    if ((display = al_get_current_display()))
+        hwnd = al_get_win_window_handle(display);
+
+    if (hwnd && (user32 = GetModuleHandleA("user32.dll"))) {
+        typedef UINT (WINAPI *fn_dpi_t)(HWND);
+        fn_dpi_t get_dpi_for_window = (fn_dpi_t)GetProcAddress(user32, "GetDpiForWindow");
+        if (get_dpi_for_window)
+            dpi = get_dpi_for_window(hwnd);
+    }
+    if (!dpi) {
+        HDC hdc = GetDC(hwnd);
+        if (hdc) {
+            dpi = GetDeviceCaps(hdc, LOGPIXELSX);
+            ReleaseDC(hwnd, hdc);
+        }
+    }
+    return dpi > 0 ? (float)dpi / 96.0f : 1.0f;
+}
+#endif
+
 float vid_display_scale(void)
 {
 #ifdef __APPLE__
-    return vid_macos_backing_scale();
+    return vid_macos_display_scale();
 #elif defined(ALLEGRO_GTK_TOPLEVEL)
     return vid_linux_display_scale();
+#elif defined(WIN32)
+    return vid_windows_display_scale();
 #else
     return 1.0f;
 #endif
