@@ -275,7 +275,7 @@ const uint8_t key_allegro2bbc[ALLEGRO_KEY_MAX] =
     0xaa,   // 221  ALLEGRO_KEY_LWIN
     0xaa,   // 222  ALLEGRO_KEY_RWIN
     0xaa,   // 223  ALLEGRO_KEY_MENU
-    0xaa,   // 224  ALLEGRO_KEY_SCROLLLOCK
+    0x40,   // 224  ALLEGRO_KEY_SCROLLLOCK use for CAPS LOCK on Mac
     0x71,   // 225  ALLEGRO_KEY_NUMLOCK
     0x40,   // 226  ALLEGRO_KEY_CAPSLOCK
 };
