@@ -88,7 +88,11 @@ void led_init(void)
     const int led_count = sizeof(led_details) / sizeof(led_details[0]);
     al_init_primitives_addon();
     al_init_font_addon();
-    if ((led_bitmap = al_create_bitmap(led_count * LED_BOX_WIDTH, LED_BOX_HEIGHT))) {
+    int prev_flags = al_get_new_bitmap_flags();
+    al_set_new_bitmap_flags(ALLEGRO_MEMORY_BITMAP);
+    led_bitmap = al_create_bitmap(led_count * LED_BOX_WIDTH, LED_BOX_HEIGHT);
+    al_set_new_bitmap_flags(prev_flags);
+    if (led_bitmap) {
         al_set_target_bitmap(led_bitmap);
         al_clear_to_color(al_map_rgb(0, 0, 64));
         if ((font = al_create_builtin_font())) {
