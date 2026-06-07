@@ -1,6 +1,7 @@
 /*B-em v2.2 by Tom Walker
   Allegro video code*/
 #include <allegro5/allegro_primitives.h>
+#include <allegro5/allegro_native_dialog.h>
 #include "b-em.h"
 #include "led.h"
 #include "main.h"
@@ -20,6 +21,15 @@ int vid_ledvisibility = LED_VIS_ALWAYS;
 int vid_lock_type;
 
 static int fskipcount;
+
+#ifdef __APPLE__
+/* Set to true by the macOS live-resize observer (vid_macos.m) while the user
+ * is dragging the resize handle. Prevents Thread 7 from issuing any OpenGL
+ * draw calls while the macOS main thread is changing the Metal drawable size,
+ * which would otherwise race and crash inside GLDTextureRec::getTextureResource. */
+volatile bool vid_live_resizing = false;
+void vid_macos_resize_init(void);
+#endif
 
 int vid_savescrshot = 0;
 char vid_scrshotname[260];
@@ -101,13 +111,15 @@ void video_enterfullscreen()
         else {
             log_error("vidalleg: could not set graphics mode to full-screen");
             fullscreen = 0;
-        }            
+        }
     }
     else {
         log_error("vidalleg: could not set graphics mode to full-screen");
         fullscreen = 0;
     }
 }
+
+static int video_led_height(void);
 
 void video_set_window_size(bool fudge)
 {
@@ -129,20 +141,19 @@ void video_set_window_size(bool fudge)
             y_wanted = (BORDER_FULL_Y_END_GRA - BORDER_FULL_Y_START_GRA) * 2;
     }
     if (vid_win_multiplier > 0) {
-        winsizex = scr_x_size = x_wanted * vid_win_multiplier;
-        winsizey = scr_y_size = y_wanted * vid_win_multiplier;
+        float dscale = vid_display_scale();
+        winsizex = scr_x_size = (int)(x_wanted * vid_win_multiplier * dscale + 0.5f);
+        winsizey = scr_y_size = (int)(y_wanted * vid_win_multiplier * dscale + 0.5f);
         if (fudge)
             winsizey += y_fudge;
-        if (vid_ledlocation == LED_LOC_SEPARATE) // Separate - LEDs have extra window space at the bottom.
-            winsizey += LED_BOX_HEIGHT;
+        winsizey += video_led_height();
     }
     else {
         if (fudge)
             y_wanted += y_fudge;
-        if (vid_ledlocation == LED_LOC_SEPARATE) // Separate - LEDs have extra window space at the bottom.
-            y_wanted += LED_BOX_HEIGHT;
         if ((scr_x_size = winsizex) < x_wanted)
             scr_x_size = winsizex = x_wanted;
+        y_wanted += video_led_height();
         if ((scr_y_size = winsizey) < y_wanted)
             scr_y_size = winsizey = y_wanted;
     }
@@ -178,9 +189,82 @@ void video_set_led_visibility(int visibility)
     vid_ledvisibility = visibility;
 }
 
+#ifdef ALLEGRO_GTK_TOPLEVEL
+/* GDK is loaded into the process via allegro_dialog's GTK support.  Use
+ * dlsym to resolve the symbols at runtime so we don't need to add an
+ * explicit link-time dependency on libgdk-3.
+ *
+ * Two separate GDK mechanisms cover the common desktop environments:
+ *   gdk_screen_get_resolution() — returns the Xft DPI, which KDE (and other
+ *     DEs using XSettings) sets to 96*scale for fractional scaling (e.g. 120
+ *     for 125%).  Returns -1 if unset (treat as 96).
+ *   gdk_monitor_get_scale_factor() — returns an integer pixel ratio (1, 2…)
+ *     used by GNOME for its 2× HiDPI mode.  KDE leaves this at 1.
+ * The total scale is the product of both. */
+#include <dlfcn.h>
+
+static float vid_linux_display_scale(void)
+{
+    typedef void *GdkScreen;
+    typedef void *GdkDisplay;
+    typedef void *GdkMonitor;
+    typedef GdkScreen  *(*fn_screen_t)(void);
+    typedef double      (*fn_res_t)(GdkScreen *);
+    typedef GdkDisplay *(*fn_display_t)(void);
+    typedef GdkMonitor *(*fn_primary_t)(GdkDisplay *);
+    typedef GdkMonitor *(*fn_monitor_t)(GdkDisplay *, int);
+    typedef int         (*fn_scale_t)(GdkMonitor *);
+
+    fn_screen_t  get_screen  = (fn_screen_t) dlsym(RTLD_DEFAULT, "gdk_screen_get_default");
+    fn_res_t     get_res     = (fn_res_t)    dlsym(RTLD_DEFAULT, "gdk_screen_get_resolution");
+    fn_display_t get_display = (fn_display_t)dlsym(RTLD_DEFAULT, "gdk_display_get_default");
+    fn_primary_t get_primary = (fn_primary_t)dlsym(RTLD_DEFAULT, "gdk_display_get_primary_monitor");
+    fn_monitor_t get_monitor = (fn_monitor_t)dlsym(RTLD_DEFAULT, "gdk_display_get_monitor");
+    fn_scale_t   get_scale   = (fn_scale_t)  dlsym(RTLD_DEFAULT, "gdk_monitor_get_scale_factor");
+
+    /* Fractional DPI scale from XSettings/Xft (covers KDE fractional scaling). */
+    float dpi_scale = 1.0f;
+    if (get_screen && get_res) {
+        GdkScreen *screen = get_screen();
+        if (screen) {
+            double dpi = get_res(screen);
+            if (dpi > 0.0)
+                dpi_scale = (float)(dpi / 96.0);
+        }
+    }
+
+    /* Integer monitor pixel ratio (covers GNOME 2× HiDPI). */
+    int mon_scale = 1;
+    if (get_display && get_scale) {
+        GdkDisplay *display = get_display();
+        if (display) {
+            GdkMonitor *mon = NULL;
+            if (get_primary) mon = get_primary(display);
+            if (!mon && get_monitor) mon = get_monitor(display, 0);
+            if (mon) mon_scale = get_scale(mon);
+        }
+    }
+
+    return dpi_scale * (float)mon_scale;
+}
+#endif
+
+float vid_display_scale(void)
+{
+#ifdef __APPLE__
+    return vid_macos_backing_scale();
+#elif defined(ALLEGRO_GTK_TOPLEVEL)
+    return vid_linux_display_scale();
+#else
+    return 1.0f;
+#endif
+}
+
 static int video_led_height(void)
 {
-    return (vid_ledlocation == LED_LOC_SEPARATE) ? LED_BOX_HEIGHT : 0;
+    if (vid_ledlocation != LED_LOC_SEPARATE)
+        return 0;
+    return (int)(LED_BOX_HEIGHT * vid_display_scale() + 0.5f);
 }
 
 void video_update_window_size(ALLEGRO_EVENT *event)
@@ -567,9 +651,14 @@ static void render_leds(void)
         }
         float w = al_get_bitmap_width(led_bitmap);
         float h = al_get_bitmap_height(led_bitmap);
+        float scale = vid_display_scale();
+        float dw = w * scale;
+        float dh = h * scale;
+        float dx = ((float)winsizex - dw) / 2.0f;
+        float dy = (float)winsizey - dh;
         if (vid_ledvisibility == LED_VIS_ALWAYS || (vid_ledvisibility == LED_VIS_TRANSIENT && led_any_transient_led_on())) {
             log_debug("led: drawing non-faded bitmap");
-            al_draw_scaled_bitmap(led_bitmap, 0, 0, w, h, (winsizex-w)/2, winsizey-h, w, h, 0);
+            al_draw_scaled_bitmap(led_bitmap, 0, 0, w, h, dx, dy, dw, dh, 0);
         }
         else {
             ALLEGRO_COLOR led_tint;
@@ -589,7 +678,7 @@ static void render_leds(void)
             }
             else
                 led_tint = al_map_rgba(0, 0, 0, vid_ledlocation == LED_LOC_SEPARATE ? 255 : 0);
-            al_draw_tinted_scaled_bitmap(led_bitmap, led_tint, 0, 0, w, h, (winsizex-w)/2, winsizey-h, w, h, 0);
+            al_draw_tinted_scaled_bitmap(led_bitmap, led_tint, 0, 0, w, h, dx, dy, dw, dh, 0);
         }
     }
 }
@@ -614,6 +703,29 @@ void video_doblit(bool non_ttx, uint8_t vtotal)
                 fullscreen_pending = 0;
             }
         }
+#ifdef __APPLE__
+        if (vid_live_resizing) {
+            al_flip_display();
+        } else {
+#endif
+        /* If the OS delivered a window that differs from our calculated
+         * winsizey (Windows DPI rounding, menu-bar insertion, etc.), sync
+         * now before rendering so the LED strip is always at the bottom. */
+        if (!fullscreen) {
+            ALLEGRO_DISPLAY *cur = al_get_current_display();
+            int actual_w = al_get_display_width(cur);
+            int actual_h = al_get_display_height(cur);
+            if (actual_w != winsizex || actual_h != winsizey) {
+                log_debug("vidalleg: video_doblit sync: winsizex %d→%d winsizey %d→%d",
+                          winsizex, actual_w, winsizey, actual_h);
+                scr_x_start = 0;
+                scr_x_size = winsizex = actual_w;
+                scr_y_start = 0;
+                winsizey = actual_h;
+                scr_y_size = winsizey - video_led_height();
+                if (scr_y_size < 0) scr_y_size = 0;
+            }
+        }
         lasty++;
         calc_limits(non_ttx, vtotal);
         fskipcount = 0;
@@ -626,6 +738,9 @@ void video_doblit(bool non_ttx, uint8_t vtotal)
         render_leds();
         al_set_target_bitmap(b);
         al_flip_display();
+#ifdef __APPLE__
+        }
+#endif
     }
     firstx = firsty = 65535;
     lastx  = lasty  = 0;

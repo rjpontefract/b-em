@@ -491,6 +491,10 @@ void main_init(int argc, char *argv[])
     tmp_display = display;
 
     gui_allegro_init(queue, display);
+    /* On Windows, attaching a native menu bar can change the client area.
+     * Re-assert the intended window size so the LED strip is always at the
+     * bottom.  The resulting DISPLAY_RESIZE event updates scr_y_size. */
+    al_resize_display(display, winsizex, winsizey);
 
     if (!(timer = al_create_timer(main_calc_timer(emu_speed_normal)))) {
         log_fatal("main: unable to create timer");

@@ -24,6 +24,11 @@ else
 b_em_LDADD = -lallegro_audio -lallegro_acodec -lallegro_primitives -lallegro_dialog -lallegro_image -lallegro_font -lallegro_main -lallegro -lz -lm -lpthread
 endif
 
+if OS_DARWIN
+b_em_OBJCFLAGS = $(b_em_CFLAGS)
+b_em_LDFLAGS = -framework Cocoa
+endif
+
 b_em_SOURCES = \
 	6502.c \
 	6502debug.c \
@@ -146,6 +151,10 @@ b_em_SOURCES = \
 	ARMulator/armdis.cpp \
 	map.c \
 	sprow.c
+
+if OS_DARWIN
+b_em_SOURCES += vid_macos.m
+endif
 
 hdfmt_SOURCES = hdfmt.c
 

@@ -817,6 +817,22 @@ ALLEGRO_DISPLAY *video_init(void)
         exit(1);
     }
 
+    /* Sync with the actual client area the OS delivered — on Windows the
+     * requested and delivered sizes can differ slightly (DPI rounding,
+     * AdjustWindowRectEx inaccuracies).  We adjust scr_y_size by the same
+     * delta so the LED strip height is preserved.  On macOS Retina,
+     * al_get_display_height returns physical pixels (2×), making scr_y_size
+     * temporarily oversized; the initial DISPLAY_RESIZE event corrects it. */
+    int actual_h = al_get_display_height(display);
+    scr_y_size += actual_h - winsizey;
+    if (scr_y_size < 0) scr_y_size = 0;
+    winsizex = al_get_display_width(display);
+    winsizey = actual_h;
+
+#ifdef __APPLE__
+    vid_macos_resize_init();
+#endif
+
     al_set_new_bitmap_flags(ALLEGRO_VIDEO_BITMAP|ALLEGRO_NO_PRESERVE_TEXTURE);
     b16 = al_create_bitmap(832, 614);
     b32 = al_create_bitmap(1536, 800);
