@@ -15,6 +15,9 @@ AC_PROG_CC
 AC_PROG_CXX
 CXXFLAGS="$CXXFLAGS -std=gnu++11"
 AM_PROG_CC_C_O
+case "$host_os" in
+  darwin*) AC_PROG_OBJC ;;
+esac
 
 # Whether this is a released build or not.
 ISRELEASED="no"
@@ -52,6 +55,7 @@ AC_CHECK_HEADER([allegro5/allegro.h],[],
 	[AC_MSG_FAILURE([The Allegro version 5 library is needed but not installed], 1)],[])
 
 AM_CONDITIONAL(OS_WIN, test "$host_os" = "win")
+AM_CONDITIONAL(OS_DARWIN, [case "$host_os" in darwin*) true;; *) false;; esac])
 
 # Checks for typedefs, structures, and compiler characteristics.
 AC_CHECK_HEADER_STDBOOL
