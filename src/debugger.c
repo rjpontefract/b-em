@@ -1,4 +1,3 @@
-#define _DEBUG
 /*B-em v2.2 by Tom Walker
   Debugger*/
 
@@ -1871,9 +1870,9 @@ void debug_preexec(cpu_debug_t *cpu, uint32_t addr)
 {
     int bp_num; /* TOHv3 */
     uint8_t shut_it_down; /* TOHv3 */
-    
+
     bool enter = false;
-    
+
     /* TOHv3 */
     bp_num = -1;
 

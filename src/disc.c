@@ -1,4 +1,3 @@
-#define _DEBUG
 /*B-em v2.2 by Tom Walker
   Disc support*/
 
@@ -148,7 +147,7 @@ static void disc_seek_common(int drive, DRIVE *dp, const char *desc, int tracks,
             dp->seek(drive, newtrack);
         dp->curtrack = newtrack;
     }
-    else 
+    else
         fdc_time = 200;
 }
 
