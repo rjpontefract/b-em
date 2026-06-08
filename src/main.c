@@ -768,6 +768,16 @@ void main_run()
             case ALLEGRO_EVENT_DISPLAY_RESIZE:
                 video_update_window_size(&event);
                 break;
+            case ALLEGRO_EVENT_DISPLAY_HALT_DRAWING:
+                vid_drawing_halted = true;
+                al_acknowledge_drawing_halt(event.display.source);
+                log_debug("main: display drawing halted, pausing rendering");
+                break;
+            case ALLEGRO_EVENT_DISPLAY_RESUME_DRAWING:
+                vid_drawing_halted = false;
+                al_acknowledge_drawing_resume(event.display.source);
+                log_debug("main: display drawing resumed, re-enabling rendering");
+                break;
             case ALLEGRO_EVENT_DISPLAY_SWITCH_OUT:
                 /* bodge for when OUT events immediately follow an IN event */
                 if ((event.any.timestamp - last_switch_in) > 0.01) {

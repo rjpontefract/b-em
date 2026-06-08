@@ -58,6 +58,7 @@ extern int vid_fskipmax, vid_fullborders;
 extern int vid_ledlocation, vid_ledvisibility;
 extern bool vid_print_mode;
 extern int vid_lock_type;
+extern bool vid_drawing_halted;
 
 extern int vid_savescrshot;
 extern char vid_scrshotname[260];

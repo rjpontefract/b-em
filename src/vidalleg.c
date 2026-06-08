@@ -19,6 +19,7 @@ int vid_fullborders = 1;
 int vid_ledlocation = LED_LOC_NONE;
 int vid_ledvisibility = LED_VIS_ALWAYS;
 int vid_lock_type;
+bool vid_drawing_halted = false;
 
 static int fskipcount;
 
@@ -722,6 +723,17 @@ static void render_leds(void)
 
 void video_doblit(bool non_ttx, uint8_t vtotal)
 {
+    if (vid_drawing_halted) {
+        /* The compositor has halted drawing for this display (e.g. the
+         * screen is locked or the window is otherwise hidden) and won't
+         * be presenting frames, so al_flip_display() would just block.
+         * Skip rendering entirely until ALLEGRO_EVENT_DISPLAY_RESUME_DRAWING
+         * arrives, so the emulation keeps running at full speed. */
+        firstx = firsty = 65535;
+        lastx  = lasty  = 0;
+        return;
+    }
+
     if (vid_savescrshot)
         save_screenshot();
 
