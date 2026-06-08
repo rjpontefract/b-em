@@ -157,8 +157,9 @@ void mem_loadrom(int slot, const char *name, const char *path, uint8_t use_name)
 }
 
 static void cfg_load_rom(int slot, const char *sect) {
-    const char *key, *name, *file;
+    const char *key, *name, *file, *swval;
     ALLEGRO_PATH *path;
+    char swkey[9];
 
     key = slotkeys[slot];
     name = al_get_config_value(bem_cfg, sect, key);
@@ -179,6 +180,10 @@ static void cfg_load_rom(int slot, const char *sect) {
             mem_loadrom(slot, file, name, 0);
         }
     }
+    snprintf(swkey, sizeof(swkey), "swram%02d", slot);
+    swval = al_get_config_value(bem_cfg, sect, swkey);
+    if (swval != NULL)
+        rom_slots[slot].swram = (atoi(swval) != 0);
 }
 
 static bool mem_load_batback(int slot)
@@ -432,6 +437,7 @@ void mem_save_romcfg(const char *sect) {
     int slot;
     rom_slot_t *slotp;
     const char *value;
+    char swkey[9];
 
     for (slot = ROM_NSLOT-1; slot >= 0; slot--) {
         slotp = rom_slots + slot;
@@ -441,6 +447,11 @@ void mem_save_romcfg(const char *sect) {
                 al_set_config_value(bem_cfg, sect, slotkeys[slot], value);
             else
                 al_remove_config_key(bem_cfg, sect, slotkeys[slot]);
+            snprintf(swkey, sizeof(swkey), "swram%02d", slot);
+            if (slotp->swram)
+                al_set_config_value(bem_cfg, sect, swkey, "1");
+            else
+                al_remove_config_key(bem_cfg, sect, swkey);
             if (slotp->backed)
                 mem_save_batback(slot);
         }
