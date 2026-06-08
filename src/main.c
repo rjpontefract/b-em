@@ -628,6 +628,7 @@ void main_key_pause(void)
 static double prev_time = 0;
 static int execs = 0;
 static int slow_count = 0;
+static int fast_count = 0;
 
 static void main_timer(ALLEGRO_EVENT *event)
 {
@@ -667,7 +668,7 @@ static void main_timer(ALLEGRO_EVENT *event)
                 spd = spd * 0.75 + 0.25 * speed / 2000000;
 
             char buf[120];
-            snprintf(buf, sizeof(buf), "%s %.3fMHz %.1f%%", VERSION_STR, speed / 1000000, spd * 100.0);
+            snprintf(buf, sizeof(buf), "%s %.3fMHz %.1f%% skip=%d", VERSION_STR, speed / 1000000, spd * 100.0, vid_fskipmax);
             al_set_window_title(tmp_display, buf);
 
             if (autoskip && !skipover) {
@@ -680,14 +681,23 @@ static void main_timer(ALLEGRO_EVENT *event)
                     }
                 }
                 else if (spd < (emu_speeds[emuspeed].multiplier * 0.95)) {
+                    fast_count = 0;
                     if (++slow_count >= 6) {
                         slow_count = 0;
                         ++vid_fskipmax;
                         log_debug("main: going slow, target=%g, spd=%g, new vid_fskipmax=%d", emu_speeds[emuspeed].multiplier, spd, vid_fskipmax);
                     }
                 }
-                else
+                else {
                     slow_count = 0;
+                    if (++fast_count >= 6) {
+                        fast_count = 0;
+                        if (vid_fskipmax > 1) {
+                            --vid_fskipmax;
+                            log_debug("main: keeping up, target=%g, spd=%g, reducing vid_fskipmax to %d", emu_speeds[emuspeed].multiplier, spd, vid_fskipmax);
+                        }
+                    }
+                }
             }
             execs = 0;
             prev_time = now;
