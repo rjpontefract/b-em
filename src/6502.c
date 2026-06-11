@@ -722,7 +722,7 @@ static void write_acccon_master(int val)
         uint8_t old_0d6c = readmem(0x0D6C);
         uint8_t new_0d6c = old_0d6c & 0x7F;
         writemem(0x0D6C, new_0d6c);
-        log_warn("ACCCON: IRR set pc=%04X $0D6C %02X->%02X interrupt|=0x40",
+        log_debug("ACCCON: IRR set pc=%04X $0D6C %02X->%02X interrupt|=0x40",
                  pc, old_0d6c, readmem(0x0D6C));
         interrupt |= 0x040;
     } else {
