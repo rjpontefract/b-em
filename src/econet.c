@@ -2062,6 +2062,26 @@ static void econet_rx_data(void)
                                         log_debug("Econet(Rx): FWS_WAIT4IDLE: FS stn=%u queued port=%02X len=%d (qlen=%d)",
                                                  host->station, EconetRx.ah.port, plen, EconetRespQLen);
                                         BeebRx.BytesInBuffer = 0;
+                                    } else if (fourwaystage == FWS_WAIT4IDLE &&
+                                               EconetRx.ah.type == AUN_TYPE_IMMEDIATE &&
+                                               host->station == EconetFakeResponseSrcStn &&
+                                               host->network == EconetFakeResponseSrcNet) {
+                                        /* FS is querying us (e.g. machine type) while we're
+                                         * waiting for its UNICAST reply.  Reply with IM_REPLY
+                                         * and stay in WAIT4IDLE. */
+                                        struct { struct aunhdr ah; uint8_t d[2]; } rpl;
+                                        memset(&rpl, 0, sizeof(rpl));
+                                        rpl.ah.type   = AUN_TYPE_IMM_REPLY;
+                                        rpl.ah.port   = EconetRx.ah.port;
+                                        rpl.ah.cb     = EconetRx.ah.cb;
+                                        rpl.ah.handle = EconetRx.ah.handle;
+                                        rpl.d[0] = 0x04;  /* BBC Master 128 */
+                                        rpl.d[1] = 0x00;
+                                        sendto(UdpSocket, (const char *)&rpl, sizeof(rpl), 0,
+                                               (SOCKADDR *)&RecvAddr, sizeof(RecvAddr));
+                                        log_debug("Econet(Rx): FWS_WAIT4IDLE: replied to immediate cb=%02X from stn=%u, staying WAIT4IDLE",
+                                                 EconetRx.ah.cb, host->station);
+                                        BeebRx.BytesInBuffer = 0;
                                     } else {
                                         econet_set_wait4idle("Rx", "unexpected 4-way state, packet ignored");
                                     }
