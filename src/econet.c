@@ -477,15 +477,6 @@ static bool EconetWaitingForBridgeResp = false;
  * block arrives. */
 static unsigned long EconetFakeResponseInjectAfter = 0;
 
-/* After faking the FS response, send the full *NOTIFY message in one AUN unicast. */
-#define NOTIFY_QUEUE_MAX 256
-static uint8_t notify_queue[NOTIFY_QUEUE_MAX];
-static int notify_queue_len = 0;
-static int notify_queue_pos = 0;
-static uint8_t notify_target_stn = 0;
-static uint8_t notify_target_net = 0;
-static unsigned long notify_next_send_trigger = 0;
-
 /* Device and temp copy */
 
 volatile struct MC6854 ADLC;
@@ -1282,8 +1273,6 @@ static void econet_tx_data(void)
                                 EconetFakeResponseLen = 2;
                                 EconetFakeResponseSrcStn = 0;
                                 EconetFakeResponseSrcNet = 0;
-                                notify_queue_len = 0;
-                                notify_queue_pos = 0;
                                 /* Log all FS packets to help diagnose protocol issues. */
                                 if (EconetTx.ah.port == EC_PORT_FS) {
                                     char hexbuf[128];
@@ -1327,49 +1316,6 @@ static void econet_tx_data(void)
                                     EconetFakeResponseLen = 3;
                                     log_debug("Econet(Tx): filesvr stub stn=%u: EXAMINE - returning empty directory",
                                              EconetStationNumber);
-                                }
-                                /* If this is an OSCLI *NOTIFY, parse it and queue the message
-                                 * for single-packet AUN unicast delivery to the target station. */
-                                if (EconetTx.ah.port == EC_PORT_FS &&
-                                    BeebTx.buff[5] == 0x00 &&
-                                    BeebTx.Pointer > 9) {
-                                    const char *text = (const char *)BeebTx.buff + 9;
-                                    int tlen = (int)BeebTx.Pointer - 9;
-                                    if (tlen > 7 && strncasecmp(text, "NOTIFY ", 7) == 0) {
-                                        const char *p = text + 7;
-                                        char *endp;
-                                        long tstn = strtol(p, &endp, 10);
-                                        if (endp > p && tstn > 0 && tstn < 255) {
-                                            while (*endp == ' ') endp++;
-                                            const char *msg = endp;
-                                            int mlen = 0;
-                                            int mleft = (int)BeebTx.Pointer - (int)(msg - (char *)BeebTx.buff);
-                                            while (mlen < mleft && (unsigned char)msg[mlen] != 0x0D)
-                                                mlen++;
-                                            /* AUN payload layout: [ext0..ext3] + 'ON ' + msg + CR
-                                             * Data delivery skips 4 scout_ext bytes, so
-                                             * BeebRx.buff[4]='O', [5]='N' (NFS ROM check at $9693). */
-                                            int qlen = 4 + 3 + mlen + 1;
-                                            if (qlen > NOTIFY_QUEUE_MAX)
-                                                qlen = NOTIFY_QUEUE_MAX, mlen = NOTIFY_QUEUE_MAX - 8;
-                                            notify_queue[0] = 1;  /* ext[0]=1 → handler $84AF (display) */
-                                            notify_queue[1] = 0;
-                                            notify_queue[2] = 0;
-                                            notify_queue[3] = 0;
-                                            notify_queue[4] = 'O';
-                                            notify_queue[5] = 'N';
-                                            notify_queue[6] = ' ';
-                                            memcpy(notify_queue + 7, msg, mlen);
-                                            notify_queue[7 + mlen] = 0x0D;
-                                            notify_queue_len = qlen;
-                                            notify_queue_pos = 0;
-                                            notify_target_stn = (uint8_t)tstn;
-                                            notify_target_net = 0;
-                                            notify_next_send_trigger = 0;
-                                            log_debug("Econet(Tx): filesvr stub stn=%u: NOTIFY stn=%u msg='%.*s' qlen=%d",
-                                                EconetStationNumber, (unsigned)tstn, mlen, msg, qlen);
-                                        }
-                                    }
                                 }
                             } else {
                                 SendMe = true;
@@ -2342,46 +2288,6 @@ static void econet_rx_data(void)
                 FlagFillActive = false;
             }
 
-            /* Send the full *NOTIFY message to the target station in one AUN unicast.
-             * payload = "ON " + message + CR so buff[4]='O', buff[5]='N', satisfying
-             * the ANFS ROM check at $9693 which gates notification display. */
-            if (confAUNmode && notify_queue_len > 0 && notify_queue_pos == 0 &&
-                fourwaystage == FWS_IDLE &&
-                notify_next_send_trigger <= EconetCycles) {
-                struct ECOLAN *ntgt = NULL;
-                for (struct ECOLAN *e = networks; e; e = e->next) {
-                    if (e->station == notify_target_stn && e->network == notify_target_net) {
-                        ntgt = e;
-                        break;
-                    }
-                }
-                if (ntgt) {
-                    uint8_t pkt[sizeof(struct aunhdr) + NOTIFY_QUEUE_MAX];
-                    struct aunhdr *ah = (struct aunhdr *)pkt;
-                    memset(ah, 0, sizeof(*ah));
-                    ah->type = AUN_TYPE_UNICAST;
-                    ah->port = 0x00;
-                    ah->cb = 0x85;
-                    ah->handle = (ec_sequence += 4);
-                    memcpy(pkt + sizeof(*ah), notify_queue, notify_queue_len);
-                    int nsendlen = (int)sizeof(*ah) + notify_queue_len;
-                    struct sockaddr_in naddr;
-                    naddr.sin_family = AF_INET;
-                    naddr.sin_port = htons(ntgt->port);
-                    naddr.sin_addr = ntgt->inet_addr;
-                    if (sendto(UdpSocket, (char *)pkt, nsendlen, 0, (SOCKADDR *)&naddr, sizeof(naddr)) == SOCKET_ERROR)
-                        log_debug("Econet: notify: failed to send to stn=%u: %s",
-                            notify_target_stn, econet_socket_errstr());
-                    else
-                        log_debug("Econet: notify: sent %d-byte message to stn=%u (%s:%u) cycles=%lu",
-                            notify_queue_len, notify_target_stn,
-                            inet_ntoa(naddr.sin_addr), ntohs(naddr.sin_port), EconetCycles);
-                } else {
-                    log_debug("Econet: notify: station %u not in networks table, dropping",
-                        notify_target_stn);
-                }
-                notify_queue_pos = notify_queue_len;  /* mark done */
-            }
 
             if (BeebRx.BytesInBuffer > 0)
                 log_dump("Econet(Rx): Econet packet: ", BeebRx.buff, BeebRx.BytesInBuffer);
