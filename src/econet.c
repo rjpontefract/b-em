@@ -2821,7 +2821,7 @@ static void econet_update_tail(void)
         EconetWaitingForBridgeResp = false;
         Econet4Wtrigger = 0;
         fourwaystage = FWS_IDLE;
-        log_warn("Econet: 4waystage timeout; Set FWS_IDLE");
+        log_debug("Econet: 4waystage timeout; Set FWS_IDLE");
         econet_adlc_debug();
     }
 
