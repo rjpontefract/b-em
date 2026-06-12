@@ -1085,6 +1085,36 @@ static void econet_tx_copy(int start)
     EconetTx.Pointer = size;
 }
 
+/*
+ * econet_machine_type — the byte a real NFS ROM would return as the first
+ * byte of a MachinePeek (cb &88/&08) reply, for the currently emulated model.
+ * Used when faking a MachinePeek reply ourselves (i.e. without injecting the
+ * immediate into the 6502/ADLC and letting the ROM answer for real).
+ */
+static uint8_t econet_machine_type(void)
+{
+    if (MASTER)
+        return 0x05;  /* BBC Master 128 (OS 3) */
+    return 0x01;      /* BBC Model B / B+ (OS 1 or 2) */
+}
+
+/*
+ * econet_machine_version — BCD MOS version for the currently emulated model,
+ * as the third/fourth bytes of a MachinePeek reply: lo holds the fractional
+ * part (e.g. 0x60 for ".60") and hi the integer part (e.g. 0x03 for "3."),
+ * giving 3.60; the Master returns 4.25.
+ */
+static void econet_machine_version(uint8_t *lo, uint8_t *hi)
+{
+    if (MASTER) {
+        *lo = 0x25;
+        *hi = 0x04;
+    } else {
+        *lo = 0x60;
+        *hi = 0x03;
+    }
+}
+
 static void econet_set_wait4idle(const char *dir, const char *reason)
 {
     fourwaystage = FWS_WAIT4IDLE;
@@ -1731,14 +1761,15 @@ static void econet_rx_data(void)
                                                  * at this point so ADLC injection would be lost.
                                                  * Reply on the Beeb's behalf and stay in FWS_IDLE
                                                  * so the login UNICAST that follows gets queued. */
-                                                struct { struct aunhdr ah; uint8_t d[2]; } rpl;
+                                                struct { struct aunhdr ah; uint8_t d[4]; } rpl;
                                                 memset(&rpl, 0, sizeof(rpl));
                                                 rpl.ah.type   = AUN_TYPE_IMM_REPLY;
                                                 rpl.ah.port   = EconetRx.ah.port;
                                                 rpl.ah.cb     = EconetRx.ah.cb;
                                                 rpl.ah.handle = EconetRx.ah.handle;
-                                                rpl.d[0] = 0x04;
+                                                rpl.d[0] = econet_machine_type();
                                                 rpl.d[1] = 0x00;
+                                                econet_machine_version(&rpl.d[2], &rpl.d[3]);
                                                 sendto(UdpSocket, (const char *)&rpl, sizeof(rpl), 0,
                                                        (SOCKADDR *)&RecvAddr, sizeof(RecvAddr));
                                                 log_debug("Econet(Rx): FWS_IDLE/bridge: auto-replied to IMMEDIATE cb=%02X from stn=%u net=%u",
@@ -1954,14 +1985,15 @@ static void econet_rx_data(void)
                                                host->network == EconetTx.destnet) {
                                         /* FS is querying us (e.g. machine type) while our TX is outstanding.
                                          * Reply with IMM_REPLY and stay in FWS_DATASENT. */
-                                        struct { struct aunhdr ah; uint8_t d[2]; } rpl;
+                                        struct { struct aunhdr ah; uint8_t d[4]; } rpl;
                                         memset(&rpl, 0, sizeof(rpl));
                                         rpl.ah.type   = AUN_TYPE_IMM_REPLY;
                                         rpl.ah.port   = EconetRx.ah.port;
                                         rpl.ah.cb     = EconetRx.ah.cb;
                                         rpl.ah.handle = EconetRx.ah.handle;
-                                        rpl.d[0] = 0x04;  /* BBC Master 128 */
+                                        rpl.d[0] = econet_machine_type();
                                         rpl.d[1] = 0x00;
+                                        econet_machine_version(&rpl.d[2], &rpl.d[3]);
                                         sendto(UdpSocket, (const char *)&rpl, sizeof(rpl), 0,
                                                (SOCKADDR *)&RecvAddr, sizeof(RecvAddr));
                                         log_debug("Econet(Rx): FWS_DATASENT: replied to immediate cb=%02X from stn=%u, staying DATASENT",
@@ -2069,14 +2101,15 @@ static void econet_rx_data(void)
                                         /* FS is querying us (e.g. machine type) while we're
                                          * waiting for its UNICAST reply.  Reply with IM_REPLY
                                          * and stay in WAIT4IDLE. */
-                                        struct { struct aunhdr ah; uint8_t d[2]; } rpl;
+                                        struct { struct aunhdr ah; uint8_t d[4]; } rpl;
                                         memset(&rpl, 0, sizeof(rpl));
                                         rpl.ah.type   = AUN_TYPE_IMM_REPLY;
                                         rpl.ah.port   = EconetRx.ah.port;
                                         rpl.ah.cb     = EconetRx.ah.cb;
                                         rpl.ah.handle = EconetRx.ah.handle;
-                                        rpl.d[0] = 0x04;  /* BBC Master 128 */
+                                        rpl.d[0] = econet_machine_type();
                                         rpl.d[1] = 0x00;
+                                        econet_machine_version(&rpl.d[2], &rpl.d[3]);
                                         sendto(UdpSocket, (const char *)&rpl, sizeof(rpl), 0,
                                                (SOCKADDR *)&RecvAddr, sizeof(RecvAddr));
                                         log_debug("Econet(Rx): FWS_WAIT4IDLE: replied to immediate cb=%02X from stn=%u, staying WAIT4IDLE",
