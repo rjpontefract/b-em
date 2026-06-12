@@ -452,6 +452,12 @@ struct econet_queued_resp {
 
 static bool EconetFakeResponsePending;
 static bool EconetFakeResponseActive;
+/* Set when FWS_SCACKSENT delivers an injected fake FS response (rather than
+ * data genuinely received over AUN).  The FS already got its real AUN ACK
+ * when the response was queued, so the NFS ROM's own FWS_DATARCVD final ACK
+ * must not be sent back over the wire — it would arrive as a spurious
+ * Acknowledge with sequence 0. */
+static bool EconetFakeResponseSuppressAck;
 static uint8_t EconetFakeResponseBuff[ECONET_RESP_BUFF_MAX];
 static int EconetFakeResponseLen;
 static uint8_t EconetFakeResponseReplyPort;
@@ -826,6 +832,7 @@ void econet_reset(void)
     EconetFakeResponseInjectAfter = 0;
     EconetFakeResponsePending = false;
     EconetFakeResponseActive = false;
+    EconetFakeResponseSuppressAck = false;
     EconetSCACKtrigger = 0;
     EconetWait4IdleTrigger = 0;
     EconetFakeFinalACKtrigger = 0;
@@ -1438,7 +1445,16 @@ static void econet_tx_data(void)
                         SendLen = sizeof(EconetRx.ah);
                         EconetTx.ah = EconetRx.ah;
                         EconetTx.ah.type = AUN_TYPE_ACK;
-                        SendMe = true;
+                        if (EconetFakeResponseSuppressAck) {
+                            /* Injected fake response: the FS already got its
+                             * real AUN ACK when the response was queued, so
+                             * don't send this internally-generated ACK
+                             * (sequence 0) back over the wire. */
+                            EconetFakeResponseSuppressAck = false;
+                            log_debug("Econet(Tx): suppressing spurious final ACK for injected FS response");
+                        } else {
+                            SendMe = true;
+                        }
                         econet_set_wait4idle("Tx", "final ack sent");
                         break;
                     case FWS_IMMRCVD:
@@ -2181,6 +2197,7 @@ static void econet_rx_data(void)
                         BeebRx.eh.srcnet = rx_scout_srcnet;
                         if (EconetFakeResponseActive) {
                             EconetFakeResponseActive = false;
+                            EconetFakeResponseSuppressAck = true;
                             memcpy(BeebRx.buff + 4, EconetFakeResponseBuff, EconetFakeResponseLen);
                             BeebRx.BytesInBuffer = 4 + EconetFakeResponseLen;
                             log_debug("Econet(Rx): filesvr stub stn=%u: fake FS response delivered BIB=%d ret=%02X fws->DATARCVD",
