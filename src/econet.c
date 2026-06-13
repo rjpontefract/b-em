@@ -1218,8 +1218,13 @@ static void econet_tx_data(void)
                     if (BeebTx.eh.destnet == 0 || (myaunnet && BeebTx.eh.destnet == myaunnet->network)) {
                         ecoent = malloc(sizeof(struct ECOLAN));
                         if (ecoent) {
+                            /* myaunnet may not be set yet (e.g. AUNMap is parsed before
+                             * EconetListenIP is known), even when destnet==0.  Fall back
+                             * to our own listening address's /24 for the network prefix. */
+                            uint32_t netprefix = myaunnet ? ntohl(myaunnet->inet_addr.s_addr)
+                                                           : (ntohl(EconetListenIP) & 0xffffff00);
                             ecoent->next = networks;
-                            ecoent->inet_addr.s_addr = htonl(ntohl(myaunnet->inet_addr.s_addr) | (BeebTx.eh.deststn & 0xff));
+                            ecoent->inet_addr.s_addr = htonl(netprefix | (BeebTx.eh.deststn & 0xff));
                             ecoent->port = 32768;  /* default AUN port */
                             ecoent->network = BeebTx.eh.destnet;
                             ecoent->station = BeebTx.eh.deststn;
