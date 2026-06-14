@@ -493,6 +493,15 @@ Hardware NOT emulated
 * Serial Port
 * Econet
 
+Econet
+======
+
+Econet support is configured via `econet.cfg` and `AUNmap.cfg` in your
+b-em config directory (`~/.config/b-em`). See `econet.cfg.example` and
+`AUNmap.cfg.example` in the repository root for documented examples,
+including how to use AUN to talk to other emulators and to real Econet
+hardware via a bridge such as the PiEconetBridge.
+
 Thanks
 ======
 

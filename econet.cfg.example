@@ -1,0 +1,184 @@
+# Example Econet configuration for b-em
+#
+# Originally based on the BeebEm Econet config by Rob O'Donnell
+# (robert@irrelevant.com), updated for b-em.
+#
+# To use this file, copy it to ~/.config/b-em/econet.cfg (create the
+# directory if it doesn't exist) and edit it for your setup.  Lines
+# starting with # are comments.
+#
+# b-em looks for this file via find_cfg_file("econet", ".cfg"), which
+# searches (in order) $XDG_CONFIG_HOME/b-em, $HOME/.config/b-em and the
+# current directory.
+#
+#
+# General options
+# =-=-=-=-=-=-=-=
+#
+# AUNMODE - if set, b-em talks AUN (Acorn Universal Networking) over UDP,
+# which is how it can communicate with real Econet hardware (via a bridge
+# such as the PiEconetBridge) and with other emulators.  If set to 0, b-em
+# falls back to a simple mode where each "station" below is just another
+# local/networked b-em instance using b-em's own non-AUN wire format.
+AUNMODE 1
+#
+# LEARN - if set, when b-em receives a packet from an IP address it
+# doesn't recognise, it looks in AUNmap.cfg for an AddMap entry whose /24
+# matches that IP to work out an Econet network number (station number is
+# the last octet of the sender's IP), and adds/updates that station's
+# entry in the table with the sender's IP/port. Useful so you don't have
+# to list every station you might hear from.
+LEARN 0
+#
+# AUNSTRICT - "STRICT" here means strict adherence to the AUN addressing
+# convention (a host's station number equals the last octet of its IP
+# address), not strict validation of destinations - if you're expecting
+# this to make b-em *drop* packets to unknown destinations, it's the
+# opposite: assuming the convention holds gives b-em a rule it can use to
+# derive an address, so it guesses instead of dropping. With AUNSTRICT
+# off there's no such rule, so an unlisted destination is simply unknown
+# and the packet goes nowhere.
+#
+# If set, and the Beeb sends to a destination station/network
+# that isn't in the table below, b-em will guess a destination IP/port to
+# send to rather than dropping the packet: for destination network 0 (or
+# b-em's own AUN network, per AUNmap.cfg), it guesses b-em's own /24 with
+# the destination station number as the last octet; for any other
+# destination network, it looks in AUNmap.cfg for an AddMap entry for that
+# network and does the same with that entry's /24. Either way it uses the
+# default AUN port 32768. Entries below always take priority over a guess.
+AUNSTRICT 1
+#
+# MASSAGENETS - AUN network numbers are conventionally 128 and above, while
+# "real" Econet network numbers seen by the emulated Beeb are below 128.
+# If NOT set, b-em ORs 128 into the network number of every packet it
+# sends, which it then matches against the network numbers in the table
+# below when checking replies. If set, it sends the network number
+# unchanged.
+#
+# For a typical setup using network 0 throughout (as in the examples
+# below), you want this set to 1: with it unset, outgoing packets would
+# be tagged network 128 but your table entries say network 0, and reply
+# matching would fail. (There's no equivalent receive-side translation -
+# that part of the option is currently unimplemented.)
+MASSAGENETS 1
+#
+#
+# Timing options
+# =-=-=-=-=-=-=-
+#
+# These control internal timing of the emulated Econet four-way handshake
+# and AUN translation. All four values below are in b-em's "EconetCycles"
+# units: 1 EconetCycle = 128 CPU cycles, which is ~64us at a 2MHz emulated
+# bus clock. (This differs from BeebEm, which uses raw CPU cycles for the
+# same-named options - don't reuse BeebEm values here unscaled.)
+#
+# Getting these wrong tends to show up as "No reply", "Line Jammed",
+# garbled *CAT output, or the emulation hanging mid-transfer.
+#
+# FLAGFILLTIMEOUT - how long b-em will flag-fill the line while waiting for
+# a reply from the emulated/real fileserver during the four-way handshake.
+# b-em's default is 256 (~16ms), which is fine for purely local/emulated
+# fileservers.
+#
+# This value is also used (x10) as the timeout for a different case: when
+# b-em is talking to a real fileserver via an AUN bridge (e.g. the
+# PiEconetBridge), the bridge ACKs the request immediately over UDP but the
+# real fileserver's reply can take much longer to arrive - we've measured
+# over a second for some Pi-based fileserver operations such as "Get byte"
+# and "Get multiple bytes" when they hit a disk sector boundary. If this
+# value is too low you'll see "Econet: bridge response wait timed out for
+# stn=... net=...".
+#
+# 50000 (~3.2s locally, ~32s for the x10 bridge-wait case) is a good
+# starting point if you're bridging to real hardware over a Pi.
+FLAGFILLTIMEOUT 256
+#
+# SCACKTIMEOUT - delay (AUN mode only) before b-em delivers a faked scout
+# acknowledgement to the emulated Beeb. AUN's UDP exchange has no separate
+# scout/ack step, so b-em fakes this part of the four-way handshake after
+# a short delay. b-em's default of 4 (~256us) is normally fine.
+SCACKTIMEOUT 4
+#
+# FOURWAYTIMEOUT - how long the four-way handshake as a whole can remain
+# non-idle - i.e. the total time from the handshake starting until b-em
+# gives up waiting for the other end (e.g. the fileserver's reply) and
+# resets back to idle. The timer is set once when the handshake leaves
+# idle and is not extended as it progresses through its stages.  b-em's
+# default is 15625 (~1s).
+#
+# If you're bridging to a real fileserver that can occasionally take more
+# than a second to reply (see FLAGFILLTIMEOUT above), this can fire just
+# before the real reply arrives, leaving b-em and the emulated NFS ROM out
+# of sync and the transfer hanging. If you're seeing hangs partway through
+# a load when bridging to real hardware, try raising this to match
+# FLAGFILLTIMEOUT, e.g. 50000 (~3.2s).
+FOURWAYTIMEOUT 15625
+#
+# TIMEBETWEENBYTES - rate-limits how fast b-em drains bytes the Beeb
+# writes to the ADLC's transmit FIFO (Beeb -> network direction only;
+# incoming bytes use a separate fixed delay), simulating realistic
+# on-wire timing so the NMI-driven transfer routine in the NFS/ANFS ROM
+# behaves as it would talking to a real Econet. b-em's default of 128
+# (~8ms/byte) is the value to leave this at - other values have proven
+# unreliable in testing.
+TIMEBETWEENBYTES 128
+#
+#
+# List of reachable computers
+# =-=-=-=-=-=-=-=-=-=-=-=-=-=
+#
+# Each line below maps an Econet network/station number to an IP
+# address and UDP port:
+#
+#   <network> <station> <ip> <port>
+#
+# A line starting with a digit is parsed as a <network> <station> <ip>
+# <port> entry (a missing or invalid field is reported as a warning in
+# the log and the line is skipped). A line starting with anything other
+# than '#' or a digit is instead treated as one of the option lines from
+# the sections above, and an unrecognised option name is also reported as
+# a warning - so make sure any comments you add start with '#'.
+#
+# - AUNSTRICT's guessing (described above) always assumes the default AUN
+#   port 32768. If AUNSTRICT and LEARN are both on, and every host in
+#   your setup uses port 32768 and follows the AUNmap.cfg subnet/station
+#   convention, you may not need any entries here at all. Entries here
+#   always override a guess, so add one whenever a host needs a
+#   non-default port (as in the PiEconetBridge example below) or address.
+# - If AUNSTRICT/LEARN are off, every station you want to talk to must be
+#   listed here, and ideally every machine on the network should have a
+#   matching list.
+# - Network number 0 means "my local Econet segment" - this is what you
+#   want for stations reached via AUN (other emulators, bridges exposing
+#   single hosts, etc). Use a non-zero network number only for stations
+#   that the bridge exposes as a distinct Econet network (e.g. a real
+#   wired Econet segment on the far side of a bridge).
+#
+#
+# Example: another b-em/BeebEm instance on the same PC, fileserver at
+# station 254 and a couple of client stations, addressed via localhost
+# with one UDP port per station:
+# 0 254 127.0.0.1 32768
+# 0 101 127.0.0.1 10101
+# 0 102 127.0.0.1 10102
+#
+# Example: a real Econet fileserver exposed over AUN by the PiEconetBridge
+# (https://github.com/cr12925/PiEconetBridge) running on a Raspberry Pi
+# at 192.168.1.225. The bridge's own AUN map config decides the port for
+# each station - here it's been set up to use 10000+<station>, but check
+# your bridge's AUN map for the ports it actually uses:
+# 0 254 192.168.1.225 10254
+#
+# Other emulators (e.g. BeebEm) on a different PC can join the same AUN
+# network too, as long as they're registered in the Pi's AUN map and
+# listed here with their own IP/port:
+# 0 105 192.168.1.218 10105
+#
+# Example: a real, wired Econet segment attached to the Pi's Econet HAT,
+# exposed by the bridge as Econet network 1 via
+#   EXPOSE HOST 1.1 ON PORT *:10001
+#   EXPOSE HOST 1.2 ON PORT *:10002
+# Station 1.1 and 1.2 then appear to b-em as network 1, stations 1 and 2:
+# 1 1 192.168.1.225 10001
+# 1 2 192.168.1.225 10002

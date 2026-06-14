@@ -1,0 +1,55 @@
+# Example AUN network map for b-em
+#
+# To use this file, copy it to ~/.config/b-em/AUNmap.cfg and edit it for
+# your setup. This file is only read when AUNMODE is enabled in
+# econet.cfg.
+#
+# b-em looks for this file via find_cfg_file("AUNmap", ".cfg"), which
+# searches (in order) $XDG_CONFIG_HOME/b-em, $HOME/.config/b-em and the
+# current directory.
+#
+# Each line has the form:
+#
+#   AddMap <ip-subnet> <econet-network-number>
+#
+# <ip-subnet> is an IPv4 address; only its first three octets (the /24
+# prefix) are used. Any host whose IP address falls within that /24 is
+# treated as being on the given Econet network number.
+#
+# This is used a few ways:
+#  - With AUNSTRICT enabled, when b-em needs to send to a destination
+#    network/station that isn't listed in econet.cfg, it looks here for
+#    an AddMap entry whose network number matches the destination
+#    network, and guesses the destination IP as that entry's /24 prefix
+#    with the destination station number as the last octet (port 32768).
+#  - With LEARN enabled, when b-em receives a packet from an IP address
+#    it doesn't recognise, it adds the sender to its station table using
+#    the last octet of its IP as the station number. It's *intended* to
+#    also look up the sender's network number from the matching AddMap
+#    entry here, but as currently implemented that lookup compares the
+#    sender's full IP against AddMap's masked /24 addresses, which never
+#    matches a real host - so learned hosts are always added as network 0
+#    regardless of what's listed here.
+#  - Either way, the entry whose /24 matches b-em's own listening address
+#    tells b-em which network number it is itself part of, which is used
+#    when AUNSTRICT guesses an address for destination network 0.
+#
+# Lines not starting with "AddMap" (including comments) are ignored.
+#
+#
+# Example: b-em is on 192.168.1.x, which corresponds to Econet network 0
+# (the default - usually fine to leave commented out unless you need to
+# be explicit):
+#AddMap 192.168.1.0 0
+#
+# Example: hosts reachable via a PiEconetBridge that exposes several
+# Econet networks on different IP subnets:
+AddMap 172.17.62.0 62
+AddMap 172.17.63.0 63
+AddMap 172.17.127.0 127
+#
+# Note: the "network 1" wired-Econet example in econet.cfg.example has no
+# corresponding AddMap entry here, because that segment is reachable via
+# the same 192.168.1.x /24 as network 0 - AddMap can't distinguish two
+# Econet networks on the same subnet, so that example relies on explicit
+# econet.cfg entries rather than AUNSTRICT/LEARN guessing via AddMap.
