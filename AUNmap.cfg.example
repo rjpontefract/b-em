@@ -23,13 +23,10 @@
 #    network, and guesses the destination IP as that entry's /24 prefix
 #    with the destination station number as the last octet (port 32768).
 #  - With LEARN enabled, when b-em receives a packet from an IP address
-#    it doesn't recognise, it adds the sender to its station table using
-#    the last octet of its IP as the station number. It's *intended* to
-#    also look up the sender's network number from the matching AddMap
-#    entry here, but as currently implemented that lookup compares the
-#    sender's full IP against AddMap's masked /24 addresses, which never
-#    matches a real host - so learned hosts are always added as network 0
-#    regardless of what's listed here.
+#    it doesn't recognise, it looks here for an AddMap entry whose /24
+#    matches that IP, and uses its network number (with the last octet of
+#    the sender's IP as the station number) to add the sender to its
+#    station table.
 #  - Either way, the entry whose /24 matches b-em's own listening address
 #    tells b-em which network number it is itself part of, which is used
 #    when AUNSTRICT guesses an address for destination network 0.

@@ -1713,7 +1713,7 @@ static void econet_rx_data(void)
                                 uint8_t station = ntohl(RecvAddr.sin_addr.s_addr) & 0xff;
                                 uint8_t network = 0;
                                 for (struct AUNTAB *aunent = aunnet; aunent; aunent = aunent->next) {
-                                    if (aunent->inet_addr.s_addr == RecvAddr.sin_addr.s_addr) {
+                                    if (aunent->inet_addr.s_addr == htonl(ntohl(RecvAddr.sin_addr.s_addr) & 0xffffff00)) {
                                         network = aunent->network;
                                         break;
                                     }
