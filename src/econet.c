@@ -1669,7 +1669,12 @@ static void econet_rx_data(void)
                     log_debug("Econet(Rx): recvfrom blocked by fourwaystage=%d", fourwaystage);
             }
             if (!confAUNmode || fourwaystage == FWS_IDLE || fourwaystage == FWS_IMMSENT || fourwaystage == FWS_DATASENT || fourwaystage == FWS_WAIT4IDLE) {
-                log_debug("Econet(Rx): recvfrom gate open fws=%d", fourwaystage);
+                static int go_count = 0;
+                static int go_fws = -1;
+                if (go_count++ == 0 || go_fws != fourwaystage) {
+                    go_fws = fourwaystage;
+                    log_debug("Econet(Rx): recvfrom gate open fws=%d", fourwaystage);
+                }
                 /* Try and get another packet from network
                  * Check if packet is waiting without blocking */
                 int RetVal;
