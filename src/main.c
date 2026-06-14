@@ -802,6 +802,7 @@ void main_close()
     config_save();
     cmos_save(&models[curmodel]);
 
+    econet_close();
     midi_close();
     mem_close();
     uef_close();

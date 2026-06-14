@@ -141,6 +141,7 @@ struct MC6854 {
 #define ADLC_STA2_RDA       0x80
 
 void econet_reset(void);
+void econet_close(void);
 uint8_t econet_read_station(void);
 uint8_t econet_read_register(uint8_t addr);
 void econet_write_register(uint8_t addr, uint8_t Value);

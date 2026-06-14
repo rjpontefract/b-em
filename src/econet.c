@@ -853,6 +853,14 @@ void econet_reset(void)
     econet_read_netfile();
 
     /*----------------------*/
+#ifdef WIN32
+    WSADATA wsaData;
+    if (WSAStartup(MAKEWORD(2, 2), &wsaData) != 0) {
+        log_error("Econet: WSAStartup failed: error %ld", WSAGetLastError());
+        return;
+    }
+#endif
+
     /* Create a SOCKET for listening for incoming connection requests. */
     if ((UdpSocket = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)) == INVALID_SOCKET) {
         log_error("Econet: Failed to open listening socket: %s", econet_socket_errstr());
@@ -3137,4 +3145,17 @@ void econet_write_register(uint8_t addr, uint8_t Value)
         econet_update_head();
         econet_update_tail();
     }
+}
+
+void econet_close(void)
+{
+    if (SocketOpen) {
+        closesocket(UdpSocket);
+        SocketOpen = false;
+    }
+#ifdef WIN32
+    WSACleanup();
+#endif
+    econet_free_networks();
+    econet_free_aunmap();
 }
