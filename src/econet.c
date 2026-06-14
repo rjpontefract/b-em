@@ -477,6 +477,16 @@ static int EconetRespQLen  = 0;
  * travels back through the Econet bridge. */
 static bool EconetWaitingForBridgeResp = false;
 
+/* Identifies the most recently processed AUN_TYPE_UNICAST (sender + port +
+ * sequence handle), so a retransmitted duplicate (sender's ACK-wait timer
+ * fired before our ACK arrived) can be re-ACKed without being delivered to
+ * the Beeb a second time. */
+static uint8_t  EconetLastUnicastStn;
+static uint8_t  EconetLastUnicastNet;
+static uint8_t  EconetLastUnicastPort;
+static uint32_t EconetLastUnicastHandle;
+static bool     EconetLastUnicastValid;
+
 /* Minimum cycle counter before the Response1 fake scout is injected.  A
  * delay of 500 polls gives ANFS time to update its NMI dispatch vector
  * ($0406/$0407) to accept scouts on the file-data port before the next
@@ -833,6 +843,7 @@ void econet_reset(void)
     EconetFakeResponsePending = false;
     EconetFakeResponseActive = false;
     EconetFakeResponseSuppressAck = false;
+    EconetLastUnicastValid = false;
     EconetSCACKtrigger = 0;
     EconetWait4IdleTrigger = 0;
     EconetFakeFinalACKtrigger = 0;
@@ -1746,6 +1757,33 @@ static void econet_rx_data(void)
                         }
                         else {
                             log_debug("Econet(Rx): AUN type=%u port=%02X cb=%02X from stn=%u fws=%d", EconetRx.ah.type, EconetRx.ah.port, EconetRx.ah.cb, host->station, fourwaystage);
+                            if (EconetRx.ah.type == AUN_TYPE_UNICAST &&
+                                EconetLastUnicastValid &&
+                                host->station == EconetLastUnicastStn &&
+                                host->network == EconetLastUnicastNet &&
+                                EconetRx.ah.port == EconetLastUnicastPort &&
+                                EconetRx.ah.handle == EconetLastUnicastHandle) {
+                                /* Sender's ACK-wait timer fired before our ACK arrived and it
+                                 * retransmitted the same Unicast.  Re-ACK it but don't deliver
+                                 * it to the Beeb again — it's already been processed. */
+                                struct aunhdr dup_ack;
+                                memset(&dup_ack, 0, sizeof(dup_ack));
+                                dup_ack.type   = AUN_TYPE_ACK;
+                                dup_ack.port   = EconetRx.ah.port;
+                                dup_ack.handle = EconetRx.ah.handle;
+                                sendto(UdpSocket, (const char *)&dup_ack, sizeof(dup_ack), 0,
+                                       (SOCKADDR *)&RecvAddr, sizeof(RecvAddr));
+                                log_debug("Econet(Rx): duplicate unicast port=%02X seq=%08X from stn=%u re-ACKed, not reprocessed",
+                                          EconetRx.ah.port, EconetRx.ah.handle, host->station);
+                                BeebRx.BytesInBuffer = 0;
+                            } else {
+                            if (EconetRx.ah.type == AUN_TYPE_UNICAST) {
+                                EconetLastUnicastValid  = true;
+                                EconetLastUnicastStn    = host->station;
+                                EconetLastUnicastNet    = host->network;
+                                EconetLastUnicastPort   = EconetRx.ah.port;
+                                EconetLastUnicastHandle = EconetRx.ah.handle;
+                            }
                             /* TODO - many of these copies can use memcpy() */
                             switch (fourwaystage) {
                                 case FWS_IDLE:
@@ -2148,6 +2186,7 @@ static void econet_rx_data(void)
                                         econet_set_wait4idle("Rx", "unexpected 4-way state, packet ignored");
                                     }
                                     break;
+                            }
                             }
                         }
                     }
