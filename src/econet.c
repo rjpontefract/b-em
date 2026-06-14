@@ -2869,12 +2869,29 @@ static void econet_update_tail(void)
     if (sr2psetemp != ADLC.sr2pse)
         log_debug("ADLC: PSE SR2Rx priority changed to %d", ADLC.sr2pse);
 
+    /* If PSE has just started reporting a pending SR2 condition (priority 1-4)
+     * that it wasn't reporting a moment ago, that's a new interrupt source
+     * becoming visible to the CPU even if the raw status2 register value
+     * didn't change this poll - e.g. PSE only just got enabled (CR2 write)
+     * while INAC_IDLE was already latched from an earlier poll. Without this,
+     * status2 == old_status2 below and S2RQ/IRQ never gets raised, leaving
+     * the CPU waiting forever for an NMI that was never sent.
+     *
+     * Restrict this to the fake-4-way scout/data injection states: this same
+     * PSE transition also happens harmlessly during normal econet idle
+     * polling (e.g. at boot with no clock present), where forcing an extra
+     * NMI here derails the boot ROM. */
+    bool pse_newly_pending = (ADLC.control2 & ADLC_CTL2_PSE) && ADLC.sr2pse != 0 && ADLC.sr2pse != sr2psetemp
+        && fourwaystage >= FWS_SCOUTRCVD && fourwaystage <= FWS_DATARCVD;
+
     /* Do we need to flag an interrupt? */
-    if (ADLC.status1 != old_status1 || ADLC.status2 != old_status2) {  /* something changed */
+    if (ADLC.status1 != old_status1 || ADLC.status2 != old_status2 || pse_newly_pending) {  /* something changed */
         uint8_t tempcause, temp2;
 
         /* SR1b1 - S2RQ - Status2 request. New bit set in S2? */
         tempcause = ((ADLC.status2 ^ old_status2) & ADLC.status2) & ~ADLC_STA2_RDA;
+        if (pse_newly_pending)
+            tempcause |= ADLC.status2 & ~ADLC_STA2_RDA;
 
         if (!(ADLC.control1 & ADLC_CTL1_RIE)) {  /* RIE not set, */
             tempcause = 0;
