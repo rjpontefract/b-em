@@ -92,7 +92,7 @@ typedef struct
     double speed_multiplier;
 } TUBE_DEFAULT;
 
-#define NUM_DFLT_TUBE 13
+#define NUM_DFLT_TUBE 14
 
 static const TUBE_DEFAULT tube_defaults[] =
 {
@@ -108,7 +108,8 @@ static const TUBE_DEFAULT tube_defaults[] =
     {"PDP11",          "PDP11",      0x0800, "PDP11Tube",        2 },
     {"6502 Turbo",     "6502 Turbo", 0x0800, "6502Turbo",        4 },
     {"65816Dossy",     "65816Dossy", 0x8000, "Dossy_816",       16 },
-    {"Sprow ARM",      "Sprow ARM",  0x80000, "Sprow_ARM",       4 }
+    {"Sprow ARM",      "Sprow ARM",  0x80000, "Sprow_ARM",       4 },
+    {"68000",          "68000",      0x8000, "CiscOS",           8 }
 };
 
 static fdc_type_t model_find_fdc(const char *name, const char *model)
