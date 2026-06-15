@@ -412,9 +412,11 @@ static unsigned long EconetTimeBetweenBytes = 128;  /* drain pace (EconetCycles 
 static unsigned long EconetWait4IdleTrigger;
 static unsigned long EconetWait4IdleTimeout = 12;
 static unsigned long Econet4Wtrigger;
-/* PiFS (and AUN file servers in general) handle Econet immediate commands only
- * on the wire interface, not via AUN UDP.  When ANFS sends an immediate (port=0)
- * to station 254, schedule a fake reply so ANFS can proceed to the 4-way login. */
+/* Watchdog for AUN immediate commands (port=0): AUN-aware hosts such as PiFS
+ * normally reply with a real IMM_REPLY straight away, but if nothing replies
+ * in time this fires a fake one so ANFS can proceed to the 4-way login
+ * instead of stalling for FourWayStageTimeout (~3.2s) and seeing
+ * "No reply from station". */
 static unsigned long EconetFakeImmReplytrigger;
 static uint8_t       EconetFakeImmReplySrcStn;
 static uint8_t       EconetFakeImmReplySrcNet;
@@ -1349,10 +1351,9 @@ static void econet_tx_data(void)
                             log_debug("Econet(Tx): Set FWS_IMMSENT");
                             SendMe = true;  /* send packet ... */
                             SendLen = sizeof(EconetTx.ah) + EconetTx.Pointer;
-                            /* Schedule a fallback fake IMM_REPLY in case the FS doesn't
-                             * respond (e.g. PiFS, which is AUN-native and never sends one).
-                             * Use a generous timeout so bridge-connected real FSes have time
-                             * to send the genuine reply first — if it arrives, the
+                            /* Schedule a fallback fake IMM_REPLY in case nothing replies in
+                             * time. Use a generous timeout so bridge-connected real FSes have
+                             * time to send the genuine reply first — if it arrives, the
                              * fws==IMMSENT guard in the timer handler makes the fake a no-op. */
                             EconetFakeImmReplytrigger = EconetCycles + EconetFlagFillTimeout / 4;
                             EconetFakeImmReplySrcStn = EconetTx.deststn;
@@ -2221,9 +2222,9 @@ static void econet_rx_data(void)
                 }
             }
 
-            /* Fake immediate reply for AUN FS station (e.g. PiFS at stn 254).
-             * AUN file servers don't respond to AUN immediate commands; inject a
-             * plausible machine-type reply so ANFS proceeds to the 4-way login. */
+            /* Watchdog fallback: if no real IMM_REPLY arrived in time, inject a
+             * plausible machine-type reply so ANFS proceeds to the 4-way login
+             * instead of stalling until FourWayStageTimeout. */
             if (confAUNmode && EconetFakeImmReplytrigger && EconetFakeImmReplytrigger <= EconetCycles) {
                 EconetFakeImmReplytrigger = 0;
                 if (fourwaystage == FWS_IMMSENT) {
