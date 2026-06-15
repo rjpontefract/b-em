@@ -1455,7 +1455,7 @@ static void econet_tx_data(void)
                                 EconetStationNumber, EconetTx.deststn,
                                 inet_ntoa(baddr.sin_addr), ntohs(baddr.sin_port), fourwaystage);
                             if (sendto(UdpSocket, (char *)&EconetTx, SendLen, 0, (SOCKADDR *)&baddr, sizeof(baddr)) == SOCKET_ERROR)
-                                log_error("Econet(Tx): Failed to broadcast to stn=%u (%s:%u)",
+                                log_warn("Econet(Tx): Failed to broadcast to stn=%u (%s:%u)",
                                     bcast_ent->station, inet_ntoa(bcast_ent->inet_addr), bcast_ent->port);
                         }
                     } else {
