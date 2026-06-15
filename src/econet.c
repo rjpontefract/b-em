@@ -75,6 +75,10 @@
 #include <winsock2.h>
 #include <ws2tcpip.h>
 #include <mstcpip.h>
+/* MinGW headers don't always define this. */
+#ifndef SIO_UDP_CONNRESET
+#define SIO_UDP_CONNRESET _WSAIOW(IOC_VENDOR, 12)
+#endif
 typedef u_long in_addr_t;
 #define inet_aton(str, addr) inet_pton(AF_INET, str, addr)
 #define local_ipaddr(a) (a.S_un.S_addr)
