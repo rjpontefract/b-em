@@ -74,6 +74,7 @@
 #endif
 #include <winsock2.h>
 #include <ws2tcpip.h>
+#include <mstcpip.h>
 typedef u_long in_addr_t;
 #define inet_aton(str, addr) inet_pton(AF_INET, str, addr)
 #define local_ipaddr(a) (a.S_un.S_addr)
@@ -884,6 +885,17 @@ void econet_reset(void)
         closesocket(UdpSocket);
         WSACleanup();
         return;
+    }
+    /* On Windows, an ICMP "port unreachable" in response to an earlier
+     * sendto() (e.g. a broadcast to a host with nothing listening on that
+     * port) causes the *next* recvfrom() on this UDP socket to fail with
+     * WSAECONNRESET (10054), even though UDP is connectionless and no
+     * packets were actually lost. Disable that behaviour. */
+    BOOL bNewBehavior = FALSE;
+    DWORD dwBytesReturned = 0;
+    if (WSAIoctl(UdpSocket, SIO_UDP_CONNRESET, &bNewBehavior, sizeof(bNewBehavior),
+                  NULL, 0, &dwBytesReturned, NULL, NULL) == SOCKET_ERROR) {
+        log_warn("Econet: Failed to disable SIO_UDP_CONNRESET: %s", econet_socket_errstr());
     }
 #else
     int flags = fcntl(UdpSocket, F_GETFL);
