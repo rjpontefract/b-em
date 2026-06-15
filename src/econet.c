@@ -1212,7 +1212,7 @@ static void econet_tx_data(void)
                 SendMe = true;
             }
             else {
-                do {
+                while (ecoent) {
                     /* does the packet match this network table entry? */
     /* SendMe = false;
      * // check for 0.stn and mynet.stn. */
@@ -1224,7 +1224,7 @@ static void econet_tx_data(void)
                         break;
                     }
                     ecoent = ecoent->next;
-                } while (ecoent);
+                }
                 /* guess address if not found in table */
                 if (!SendMe && confSTRICT) {  /* didn't find it and allowed to guess */
                     log_debug("Econet(Tx): Send to unknown host; make assumptions & add entry!");
@@ -1442,7 +1442,7 @@ static void econet_tx_data(void)
                     log_dump("Econet(Tx): AUN Packet: ", (uint8_t *)&EconetTx, SendLen);
                     if (sendto(UdpSocket, (char *)&EconetTx, SendLen, 0, (SOCKADDR *) &RecvAddr, sizeof(RecvAddr)) == SOCKET_ERROR) {
                         log_error("Econet(Tx): Failed to send packet to %02x %02x (%s:%u)",
-                                  (unsigned int)(ecoent->network), (unsigned int)ecoent->station, inet_ntoa(ecoent->inet_addr), (unsigned int)ecoent->port);
+                                  (unsigned int)(BeebTx.eh.destnet), (unsigned int)BeebTx.eh.deststn, inet_ntoa(RecvAddr.sin_addr), (unsigned int)ntohs(RecvAddr.sin_port));
                     }
                     }
                     FlagFillActive = true;
@@ -1454,7 +1454,7 @@ static void econet_tx_data(void)
                     log_dump("Econet(Tx): BeebEm Packet: ", BeebTx.buff, BeebTx.Pointer);
                     if (sendto(UdpSocket, (char *)BeebTx.buff, BeebTx.Pointer, 0, (SOCKADDR *) &RecvAddr, sizeof(RecvAddr)) == SOCKET_ERROR) {
                         log_error("Econet(Tx): Failed to send packet to %02x %02x (%s:%u)",
-                                  (unsigned int)(BeebTx.eh.destnet), (unsigned int)BeebTx.eh.deststn, inet_ntoa(ecoent->inet_addr), (unsigned int)ecoent->port);
+                                  (unsigned int)(BeebTx.eh.destnet), (unsigned int)BeebTx.eh.deststn, inet_ntoa(RecvAddr.sin_addr), (unsigned int)ntohs(RecvAddr.sin_port));
                     }
                     /* If we have just sent a packet then then a real peer
                      * would probably go into flag-fill.  The exception is
