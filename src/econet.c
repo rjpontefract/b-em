@@ -443,6 +443,7 @@ struct econet_queued_resp {
     uint8_t  cb;
     uint8_t  src_stn;
     uint8_t  src_net;
+    uint32_t handle;
 };
 
 static bool EconetFakeResponsePending;
@@ -459,6 +460,10 @@ static uint8_t EconetFakeResponseReplyPort;
 static uint8_t EconetFakeResponseCb;
 static uint8_t EconetFakeResponseSrcStn;
 static uint8_t EconetFakeResponseSrcNet;
+/* AUN handle of a queued extended-scout (NOTIFY/printer) transaction, saved
+ * so the eventual FWS_DATARCVD final ACK carries the sender's own handle and
+ * is recognised as the reply to their original packet. */
+static uint32_t EconetFakeResponseHandle;
 
 /* Circular queue of FS responses waiting to be promoted to Response1. */
 static struct econet_queued_resp EconetRespQ[ECONET_RESPQ_DEPTH];
@@ -1864,12 +1869,6 @@ static void econet_rx_data(void)
                                                  * 6-byte header so the ANFS ROM sees source address data. */
                                                 memcpy(BeebRx.buff + sizeof(BeebRx.eh), EconetRx.buff, 4);
                                                 BeebRx.BytesInBuffer = (int)(sizeof(BeebRx.eh) + 4);
-                                                log_debug("Econet(Rx): ext scout BIB=%d buff=[%02X %02X %02X %02X %02X %02X %02X %02X %02X %02X] $0D6C=%02X",
-                                                    BeebRx.BytesInBuffer,
-                                                    BeebRx.buff[0], BeebRx.buff[1], BeebRx.buff[2], BeebRx.buff[3],
-                                                    BeebRx.buff[4], BeebRx.buff[5], BeebRx.buff[6], BeebRx.buff[7],
-                                                    BeebRx.buff[8], BeebRx.buff[9],
-                                                    readmem(0x0D6C));
                                             } else {
                                                 BeebRx.BytesInBuffer = sizeof(BeebRx.eh);
                                             }
@@ -2104,6 +2103,34 @@ static void econet_rx_data(void)
                                         log_debug("Econet(Rx): FWS_WAIT4IDLE: replied to immediate cb=%02X from stn=%u, staying WAIT4IDLE",
                                                  EconetRx.ah.cb, host->station);
                                         BeebRx.BytesInBuffer = 0;
+                                    } else if (fourwaystage == FWS_WAIT4IDLE &&
+                                               EconetRx.ah.type == AUN_TYPE_UNICAST &&
+                                               EconetRx.ah.port == 0x00 &&
+                                               (EconetRx.ah.cb & 0x7F) >= 0x03 && (EconetRx.ah.cb & 0x7F) <= 0x05 &&
+                                               EconetRespQLen < ECONET_RESPQ_DEPTH) {
+                                        /* An extended-scout transaction (e.g. the next *NOTIFY
+                                         * character) arrived from another station while we were
+                                         * still finishing the previous one's fake handshake.
+                                         * These arrive faster than the fake handshake settles,
+                                         * so queue it for replay once we're back in FWS_IDLE
+                                         * rather than dropping it. */
+                                        int plen = RetVal - (int)sizeof(EconetRx.ah);
+                                        if (plen < 0) plen = 0;
+                                        if (plen > ECONET_RESP_BUFF_MAX)
+                                            plen = ECONET_RESP_BUFF_MAX;
+                                        struct econet_queued_resp *q = &EconetRespQ[EconetRespQTail];
+                                        memcpy(q->buff, EconetRx.buff, plen);
+                                        q->len        = plen;
+                                        q->reply_port = EconetRx.ah.port;
+                                        q->cb         = EconetRx.ah.cb;
+                                        q->handle     = EconetRx.ah.handle;
+                                        q->src_stn    = host->station;
+                                        q->src_net    = host->network;
+                                        EconetRespQTail = (EconetRespQTail + 1) % ECONET_RESPQ_DEPTH;
+                                        EconetRespQLen++;
+                                        log_debug("Econet(Rx): FWS_WAIT4IDLE: ext scout port=%02X cb=%02X from stn=%u queued (qlen=%d)",
+                                                 EconetRx.ah.port, EconetRx.ah.cb, host->station, EconetRespQLen);
+                                        BeebRx.BytesInBuffer = 0;
                                     } else {
                                         econet_set_wait4idle("Rx", "unexpected 4-way state, packet ignored");
                                     }
@@ -2171,6 +2198,19 @@ static void econet_rx_data(void)
                         BeebRx.eh.srcnet = rx_scout_srcnet;
                         if (EconetFakeResponseActive) {
                             EconetFakeResponseActive = false;
+                            if (EconetFakeResponseReplyPort == 0x00 &&
+                                (EconetFakeResponseCb & 0x7F) >= 0x03 && (EconetFakeResponseCb & 0x7F) <= 0x05) {
+                                /* Extended scout (NOTIFY/printer): deliver just the data
+                                 * byte(s) after the 4-byte scout_ext prefix, matching the
+                                 * live ext-scout data-delivery path.  The sender's own AUN
+                                 * handle was preserved, so let the normal FWS_DATARCVD path
+                                 * send the final ACK (don't suppress it). */
+                                size_t data_len = EconetFakeResponseLen > 4 ? EconetFakeResponseLen - 4 : 0;
+                                memcpy(BeebRx.buff + 4, EconetFakeResponseBuff + 4, data_len);
+                                BeebRx.BytesInBuffer = 4 + (int)data_len;
+                                log_debug("Econet(Rx): stn=%u: queued ext scout delivered BIB=%d fws->DATARCVD",
+                                    EconetStationNumber, BeebRx.BytesInBuffer);
+                            } else {
                             EconetFakeResponseSuppressAck = true;
                             memcpy(BeebRx.buff + 4, EconetFakeResponseBuff, EconetFakeResponseLen);
                             BeebRx.BytesInBuffer = 4 + EconetFakeResponseLen;
@@ -2189,6 +2229,7 @@ static void econet_rx_data(void)
                                     EconetFakeResponseSrcStn, EconetFakeResponseBuff[1],
                                     EconetFakeResponseBuff[1], errtxt);
                             }
+                            }
                         } else {
                             if (EconetRx.ah.port == 0x00 &&
                                 (EconetRx.ah.cb & 0x7F) >= 0x03 && (EconetRx.ah.cb & 0x7F) <= 0x05) {
@@ -2206,12 +2247,6 @@ static void econet_rx_data(void)
                             } else {
                                 econet_rx_copy(4, EconetRx.BytesInBuffer);
                             }
-                            log_debug("Econet(Rx): data delivery deststn=%u srcstn=%u BIB=%u fws->DATARCVD $0D6C=%02X buff[4..7]=%02X %02X %02X %02X",
-                                BeebRx.eh.deststn, BeebRx.eh.srcstn, BeebRx.BytesInBuffer, readmem(0x0D6C),
-                                BeebRx.BytesInBuffer > 4 ? BeebRx.buff[4] : 0,
-                                BeebRx.BytesInBuffer > 5 ? BeebRx.buff[5] : 0,
-                                BeebRx.BytesInBuffer > 6 ? BeebRx.buff[6] : 0,
-                                BeebRx.BytesInBuffer > 7 ? BeebRx.buff[7] : 0);
                         }
                         BeebRx.Pointer = 0;
                         fourwaystage = FWS_DATARCVD;
@@ -2264,6 +2299,7 @@ static void econet_rx_data(void)
                 EconetFakeResponseCb        = q->cb;
                 EconetFakeResponseSrcStn    = q->src_stn;
                 EconetFakeResponseSrcNet    = q->src_net;
+                EconetFakeResponseHandle    = q->handle;
                 EconetFakeResponsePending   = true;
                 EconetFakeResponseInjectAfter = EconetCycles + 50;
                 EconetRespQHead = (EconetRespQHead + 1) % ECONET_RESPQ_DEPTH;
@@ -2289,6 +2325,7 @@ static void econet_rx_data(void)
                 EconetRx.ah.type = AUN_TYPE_UNICAST;
                 EconetRx.ah.port = EconetFakeResponseReplyPort;
                 EconetRx.ah.cb = EconetFakeResponseCb;
+                EconetRx.ah.handle = EconetFakeResponseHandle;
                 memcpy(EconetRx.buff, EconetFakeResponseBuff, EconetFakeResponseLen);
                 EconetRx.BytesInBuffer = sizeof(EconetRx.ah) + EconetFakeResponseLen;
 
@@ -2298,8 +2335,18 @@ static void econet_rx_data(void)
                 BeebRx.eh.srcnet = EconetFakeResponseSrcNet;
                 BeebRx.eh.cb = EconetFakeResponseCb | 0x80;
                 BeebRx.eh.port = EconetFakeResponseReplyPort;
-                BeebRx.BytesInBuffer = sizeof(BeebRx.eh);
                 BeebRx.Pointer = 0;
+
+                if (EconetFakeResponseReplyPort == 0x00 &&
+                    (EconetFakeResponseCb & 0x7F) >= 0x03 && (EconetFakeResponseCb & 0x7F) <= 0x05 &&
+                    EconetFakeResponseLen >= 4) {
+                    /* Extended scout (NOTIFY/printer): replay the saved scout_ext
+                     * bytes, matching the live FWS_IDLE ext-scout path. */
+                    memcpy(BeebRx.buff + sizeof(BeebRx.eh), EconetFakeResponseBuff, 4);
+                    BeebRx.BytesInBuffer = (int)(sizeof(BeebRx.eh) + 4);
+                } else {
+                    BeebRx.BytesInBuffer = sizeof(BeebRx.eh);
+                }
 
                 rx_scout_srcstn = EconetFakeResponseSrcStn;
                 rx_scout_srcnet = EconetFakeResponseSrcNet;
