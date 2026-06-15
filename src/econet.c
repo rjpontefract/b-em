@@ -132,7 +132,6 @@ struct aunhdr {
 #define AUN_TYPE_IMM_REPLY  6
 
     uint8_t port;  /* dest port */
-#define EC_PORT_FS              0x99
 #define EC_PORT_PS_STATUS_ENQ   0x9f
 #define EC_PORT_PS_STATUS_REPLY 0x9e
 #define EC_PORT_PS_JOB          0xd1
@@ -413,12 +412,6 @@ static unsigned long EconetTimeBetweenBytes = 128;  /* drain pace (EconetCycles 
 static unsigned long EconetWait4IdleTrigger;
 static unsigned long EconetWait4IdleTimeout = 12;
 static unsigned long Econet4Wtrigger;
-/* When the NFS ROM sends a unicast to station 0 (the file server) via a
- * four-way handshake we fake the whole exchange: fake scout ACK via the
- * existing EconetSCACKtrigger, then re-broadcast the data block and
- * schedule this trigger to produce the fake final ACK in FWS_DATASENT. */
-static unsigned long EconetFakeFinalACKtrigger;
-
 /* PiFS (and AUN file servers in general) handle Econet immediate commands only
  * on the wire interface, not via AUN UDP.  When ANFS sends an immediate (port=0)
  * to station 254, schedule a fake reply so ANFS can proceed to the 4-way login. */
@@ -846,7 +839,6 @@ void econet_reset(void)
     EconetLastUnicastValid = false;
     EconetSCACKtrigger = 0;
     EconetWait4IdleTrigger = 0;
-    EconetFakeFinalACKtrigger = 0;
     EconetFakeImmReplytrigger = 0;
     Econet4Wtrigger = 0;
 
@@ -1312,7 +1304,7 @@ static void econet_tx_data(void)
                             /* Extended-scout ports (NOTIFY 0x85, printer 0x83-0x84): prepend the
                              * 4 scout_ext bytes saved from the original scout frame so the AUN
                              * UNICAST payload is [scout_ext][data], as the receiver expects. */
-                            if (EconetTx.ah.port == 0 && EconetTx.ah.cb >= 2 && EconetTx.ah.cb <= 5) {
+                            if (EconetTx.ah.port == 0 && EconetTx.ah.cb >= 3 && EconetTx.ah.cb <= 5) {
                                 int data_len = BeebTx.Pointer - 4;
                                 if (data_len < 0) data_len = 0;
                                 memcpy(EconetTx.buff, BeebTxScoutExt, 4);
@@ -1323,65 +1315,8 @@ static void econet_tx_data(void)
                             }
                             fourwaystage = FWS_DATASENT;
                             log_debug("Econet(Tx): Set FWS_DATASENT");
-                            if (EconetTx.deststn == 0) {
-                                /* File-server stub: fake the final ACK from station 0 so the
-                                 * NFS ROM sees a successful transaction.  No UDP packet is sent. */
-                                EconetFakeFinalACKtrigger = EconetCycles + EconetSCACKtimeout;
-                                EconetFakeResponseReplyPort = BeebTx.buff[4];
-                                EconetFakeResponseCb = 0x00;
-                                EconetFakeResponseBuff[0] = 0x00;
-                                EconetFakeResponseBuff[1] = 0x00;
-                                EconetFakeResponseLen = 2;
-                                EconetFakeResponseSrcStn = 0;
-                                EconetFakeResponseSrcNet = 0;
-                                /* Log all FS packets to help diagnose protocol issues. */
-                                if (EconetTx.ah.port == EC_PORT_FS) {
-                                    char hexbuf[128];
-                                    int hlen = 0;
-                                    unsigned hmax = BeebTx.Pointer < 32 ? BeebTx.Pointer : 32;
-                                    for (unsigned hi = 0; hi < hmax && hlen + 3 < (int)sizeof(hexbuf); hi++)
-                                        hlen += snprintf(hexbuf + hlen, sizeof(hexbuf) - hlen, "%02X ", BeebTx.buff[hi]);
-                                    log_debug("Econet(Tx): filesvr stub stn=%u: FS TX port=%02X len=%u [%s]",
-                                             EconetStationNumber, EconetTx.ah.port, BeebTx.Pointer, hexbuf);
-                                }
-                                /* Level 3 FS: *I AM (LOGON, function $00 with handle=0)
-                                 * Packet layout: [0..3]=addr [4]=replyport [5]=func($00)
-                                 * [6]=handle($00 not logged in) [7..16]=user(10) [17..26]=pw(10)
-                                 * Distinguish from OSCLI *NOTIFY (same func $00) by checking
-                                 * that buff+9 does NOT start with "NOTIFY ". */
-                                bool fs_is_logon = (EconetTx.ah.port == EC_PORT_FS &&
-                                    BeebTx.Pointer >= 16 &&
-                                    BeebTx.buff[5] == 0x00 &&
-                                    !(BeebTx.Pointer > 9 &&
-                                      strncasecmp((const char *)BeebTx.buff + 9, "NOTIFY ", 7) == 0));
-                                if (fs_is_logon) {
-                                    /* Level 3 FS login reply: retcode, boot, userhandle, URD, CSD, LIB */
-                                    EconetFakeResponseBuff[0] = 0x00;  /* return code = success */
-                                    EconetFakeResponseBuff[1] = 0x00;  /* boot option = none */
-                                    EconetFakeResponseBuff[2] = 0x01;  /* user handle (non-zero) */
-                                    EconetFakeResponseBuff[3] = 0x01;  /* URD handle (non-zero or ANFS aborts) */
-                                    EconetFakeResponseBuff[4] = 0x01;  /* CSD handle */
-                                    EconetFakeResponseBuff[5] = 0x01;  /* LIB handle */
-                                    EconetFakeResponseLen = 6;
-                                    log_debug("Econet(Tx): filesvr stub stn=%u: *I AM LOGON - returning 6-byte success",
-                                             EconetStationNumber);
-                                }
-                                /* Level 3 FS: EXAMINE ($03) - directory listing
-                                 * Reply: retcode, entries_in_reply, entries_remaining
-                                 * Return empty directory so *CAT completes instead of looping. */
-                                if (EconetTx.ah.port == EC_PORT_FS &&
-                                    BeebTx.buff[5] == 0x03) {
-                                    EconetFakeResponseBuff[0] = 0x00;  /* return code = OK */
-                                    EconetFakeResponseBuff[1] = 0x00;  /* entries in this reply = 0 */
-                                    EconetFakeResponseBuff[2] = 0x00;  /* entries remaining = 0 */
-                                    EconetFakeResponseLen = 3;
-                                    log_debug("Econet(Tx): filesvr stub stn=%u: EXAMINE - returning empty directory",
-                                             EconetStationNumber);
-                                }
-                            } else {
-                                SendMe = true;
-                                SendLen = sizeof(EconetTx.ah) + EconetTx.Pointer;
-                            }
+                            SendMe = true;
+                            SendLen = sizeof(EconetTx.ah) + EconetTx.Pointer;
                             break;
                         }  /* else fall through... */
                     case FWS_IDLE:
@@ -1393,8 +1328,8 @@ static void econet_tx_data(void)
                         EconetTx.ah.port = (unsigned int)(BeebTx.eh.port);
                         EconetTx.ah.pad = 0;
                         EconetTx.ah.handle = (ec_sequence += 4);
-                        /* Save extended-scout bytes for NOTIFY/printer (PORT & 0x7F in [2..5]) */
-                        if (EconetTx.ah.cb >= 2 && EconetTx.ah.cb <= 5 && BeebTx.Pointer >= 10)
+                        /* Save extended-scout bytes for NOTIFY/printer (PORT & 0x7F in [3..5]) */
+                        if (EconetTx.ah.cb >= 3 && EconetTx.ah.cb <= 5 && BeebTx.Pointer >= 10)
                             memcpy(BeebTxScoutExt, BeebTx.buff + 6, 4);
                         else
                             memset(BeebTxScoutExt, 0, 4);
@@ -1407,20 +1342,6 @@ static void econet_tx_data(void)
                             econet_set_wait4idle("Tx", "broadcast snt");
                             SendMe = true;  /* send packet ... */
                             SendLen = sizeof(EconetTx.ah) + 8;
-                        }
-                        else if (EconetTx.deststn == 0) {
-                            /* Station 0 is the Econet file server.  No real host exists in
-                             * AUN mode, so fake the four-way handshake:  the existing
-                             * EconetSCACKtrigger fires a fake scout ACK; when the data
-                             * block then arrives in FWS_SCACKRCVD we rebroadcast it and
-                             * schedule EconetFakeFinalACKtrigger. */
-                            EconetTx.ah.type = AUN_TYPE_UNICAST;
-                            fourwaystage = FWS_SCOUTSENT;
-                            log_debug("Econet(Tx): filesvr stub: stn=0 port=%02X fws->SCOUTSENT (fake 4-way)", EconetTx.ah.port);
-                            EconetSCACKtrigger = EconetCycles + EconetSCACKtimeout;
-                            FlagFillActive = true;
-                            EconetFlagFillTimeoutTrigger = EconetCycles + EconetFlagFillTimeout;
-                            /* SendMe stays false — scout is not sent over UDP */
                         }
                         else if (EconetTx.ah.port == 0 && (EconetTx.ah.cb < 2 || EconetTx.ah.cb > 5)) {
                             EconetTx.ah.type = AUN_TYPE_IMMEDIATE;
@@ -2022,7 +1943,7 @@ static void econet_rx_data(void)
                                         /* Extended-scout ports (NOTIFY 0x85, printer 0x83-0x84) never
                                          * generate a follow-up UNICAST reply — only FS operations do.
                                          * Skip the bridge-response wait to avoid a ~10x-timeout stall. */
-                                        if (!(EconetTx.ah.port == 0 && EconetTx.ah.cb >= 2 && EconetTx.ah.cb <= 5)) {
+                                        if (!(EconetTx.ah.port == 0 && EconetTx.ah.cb >= 3 && EconetTx.ah.cb <= 5)) {
                                             /* Record the ACK sender as the response source so that
                                              * the real UNICAST reply (sent as a separate packet by
                                              * bridge-style AUN hosts after processing the request)
@@ -2297,25 +2218,6 @@ static void econet_rx_data(void)
                         break;
                     default:
                         break;
-                }
-            }
-
-            /* Fake final ACK for file-server stub (station 0) transactions.
-             * Fires after the data block has been broadcast and enough time has
-             * passed for the NFS ROM to switch from TX to RX mode. */
-            if (confAUNmode && EconetFakeFinalACKtrigger && EconetFakeFinalACKtrigger <= EconetCycles) {
-                EconetFakeFinalACKtrigger = 0;
-                if (fourwaystage == FWS_DATASENT) {
-                    log_debug("Econet(Rx): filesvr stub: fake final ACK from stn=0 fws->WAIT4IDLE replyport=%02X",
-                        EconetFakeResponseReplyPort);
-                    BeebRx.eh.srcstn = 0;
-                    BeebRx.eh.srcnet = 0;
-                    BeebRx.eh.deststn = EconetStationNumber;
-                    BeebRx.eh.destnet = 0;
-                    BeebRx.BytesInBuffer = 4;
-                    BeebRx.Pointer = 0;
-                    econet_set_wait4idle("Rx", "filesvr stub final ack");
-                    EconetFakeResponsePending = true;
                 }
             }
 
@@ -2634,8 +2536,7 @@ static void econet_rx_tx(void)
  *   - FlagFill timeout: clears FlagFillActive when EconetFlagFillTimeoutTrigger fires.
  *   - FWS_WAIT4IDLE → FWS_IDLE transition after EconetWait4IdleTimeout polls.
  *   - 4-way stage timeout (Econet4Wtrigger): resets FSM to FWS_IDLE on stall.
- *   - Fake scout/ACK injection timers (EconetSCACKtrigger, EconetFakeFinalACKtrigger,
- *     EconetFakeImmReplytrigger).
+ *   - Fake scout/ACK injection timers (EconetSCACKtrigger, EconetFakeImmReplytrigger).
  */
 static void econet_update_tail(void)
 {
@@ -2684,7 +2585,6 @@ static void econet_update_tail(void)
     else if (Econet4Wtrigger <= EconetCycles) {
         EconetSCACKtrigger = 0;
         EconetWait4IdleTrigger = 0;
-        EconetFakeFinalACKtrigger = 0;
         EconetFakeImmReplytrigger = 0;
         EconetFakeResponsePending = false;
         EconetFakeResponseActive = false;
@@ -2997,8 +2897,6 @@ void econet_poll(void)
             Econet4Wtrigger -= LONG_MAX;
         if (EconetTxByteTrigger)
             EconetTxByteTrigger -= LONG_MAX;
-        if (EconetFakeFinalACKtrigger)
-            EconetFakeFinalACKtrigger -= LONG_MAX;
         if (EconetFakeImmReplytrigger)
             EconetFakeImmReplytrigger -= LONG_MAX;
     }
