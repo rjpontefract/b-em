@@ -129,7 +129,7 @@ const uint8_t key_allegro2bbc[ALLEGRO_KEY_MAX] =
     0x62,   // 75   ALLEGRO_KEY_SPACE
     0xaa,   // 76   ALLEGRO_KEY_INSERT
     0x59,   // 77   ALLEGRO_KEY_DELETE
-    0x5c,   // 78   ALLEGRO_KEY_HOME
+    0x40,   // 78   ALLEGRO_KEY_HOME use for CAPS LOCK on Mac
     0x69,   // 79   ALLEGRO_KEY_END
     0xaa,   // 80   ALLEGRO_KEY_PGUP
     0x4c,   // 81   ALLEGRO_KEY_PGDN
