@@ -1324,9 +1324,12 @@ static void econet_tx_data(void)
                          * what we have /should/ be the data block ..
                          * CLUDGE WARNING is this a scout sent again immediately?? TODO fix this?!?! */
                         if (BeebTx.Pointer != sizeof(BeebTx.eh) || memcmp(BeebTx.buff, BeebTxCopy, sizeof(BeebTx.eh)) != 0) {  /* nope */
-                            /* Extended-scout ports (NOTIFY 0x85, printer 0x83-0x84): prepend the
+                            /* Extended-scout port-0 immediate ops (e.g. NOTIFY 0x85): prepend the
                              * 4 scout_ext bytes saved from the original scout frame so the AUN
-                             * UNICAST payload is [scout_ext][data], as the receiver expects. */
+                             * UNICAST payload is [scout_ext][data], as the receiver expects.
+                             * Real Econet printing is a separate, ordinary port-based protocol
+                             * (status query/reply on 0x9F/0x9E, job data on 0xD1) and goes
+                             * through the generic unicast path below instead. */
                             if (EconetTx.ah.port == 0 && EconetTx.ah.cb >= 3 && EconetTx.ah.cb <= 5) {
                                 int data_len = BeebTx.Pointer - 4;
                                 if (data_len < 0) data_len = 0;
@@ -1956,8 +1959,9 @@ static void econet_rx_data(void)
                                         BeebRx.eh.destnet = 0;
                                         BeebRx.BytesInBuffer = 4;
                                         BeebRx.Pointer = 0;
-                                        /* Extended-scout ports (NOTIFY 0x85, printer 0x83-0x84) never
-                                         * generate a follow-up UNICAST reply — only FS operations do.
+                                        /* Extended-scout port-0 immediate ops (e.g. NOTIFY 0x85) never
+                                         * generate a follow-up UNICAST reply — only FS operations (and
+                                         * ordinary port-based protocols like printing on 0x9F/0xD1) do.
                                          * Skip the bridge-response wait to avoid a ~10x-timeout stall. */
                                         if (!(EconetTx.ah.port == 0 && EconetTx.ah.cb >= 3 && EconetTx.ah.cb <= 5)) {
                                             /* Record the ACK sender as the response source so that
