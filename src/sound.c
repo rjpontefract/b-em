@@ -129,9 +129,13 @@ static void sound_poll_all(void)
             sound_buffer[sound_pos + c] += temp_buffer[0];
             sound_buffer[sound_pos + c + 4] += temp_buffer[1];
         }
-        // skip forward 8 mono samples
-        sound_pos += 8;
-        if (sound_pos == BUFLEN_SO) {
+    }
+
+    // Always advance and wrap counters so sound_sn_pos never escapes
+    // sound_buffer bounds even when sound is toggled off mid-buffer.
+    sound_pos += 8;
+    if (sound_pos == BUFLEN_SO) {
+        if ((sound_internal || sound_beebsid) && stream) {
             float *buf = al_get_audio_stream_fragment(stream);
             if (buf) {
                 if (sound_filter) {
@@ -147,10 +151,10 @@ static void sound_poll_all(void)
                 al_set_audio_stream_playing(stream, true);
             } else
                 log_debug("sound: overrun");
-            sound_pos = 0;
-            sound_sn_pos = 0;
-            memset(sound_buffer, 0, sizeof(sound_buffer));
         }
+        sound_pos = 0;
+        sound_sn_pos = 0;
+        memset(sound_buffer, 0, sizeof(sound_buffer));
     }
 }
 
