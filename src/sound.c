@@ -135,7 +135,7 @@ static void sound_poll_all(void)
     // sound_buffer bounds even when sound is toggled off mid-buffer.
     sound_pos += 8;
     if (sound_pos == BUFLEN_SO) {
-        if ((sound_internal || sound_beebsid) && stream) {
+        if ((sound_internal || sound_beebsid || sound_speech) && stream) {
             float *buf = al_get_audio_stream_fragment(stream);
             if (buf) {
                 if (sound_filter) {
