@@ -1168,9 +1168,22 @@ static void econet_set_wait4idle(const char *dir, const char *reason)
 /*
  * econet_tx_data — drain one byte from the ADLC TX FIFO into BeebTx.
  *
- * Called each poll when TX is not in reset.  Rate-limits draining to one byte
- * per EconetTimeBetweenBytes poll ticks, simulating the ADLC's on-wire byte
- * rate so the BBC ROM doesn't overflow the FIFO.
+ * Called each poll when TX is not in reset.  On real Econet hardware this
+ * rate-limits draining to one byte per EconetTimeBetweenBytes poll ticks, to
+ * simulate the ADLC's on-wire byte rate (nominally ~250kbit/s, i.e. roughly
+ * one byte per poll tick) so the BBC ROM doesn't overflow the FIFO.
+ *
+ * EconetTimeBetweenBytes defaults to 128 poll ticks/byte -- ~256x slower
+ * than that real rate (~8.2ms/byte instead of ~32us/byte). That's academic
+ * on real Econet, where nothing is actually waiting on the wire timing, but
+ * AUN elides the wire entirely: the whole frame is only ever dispatched as
+ * one UDP datagram once TxLast is seen (below), so this pacing serves no
+ * purpose here except to make the guest's own byte-feeding loop (which is
+ * what's actually gating progress once the FIFO is full) sit idle for far
+ * longer than necessary -- for a ~1.3KB PUT block this adds up to over ten
+ * real seconds per block. Skip the extra throttle in AUN mode and drain at
+ * one byte per poll tick instead, matching how econet_rx_data() already
+ * paces the receive side.
  *
  * When the TxLast flag is set on the byte being drained (meaning the ROM has
  * finished writing the frame), the complete BeebTx buffer is dispatched as a
@@ -1186,7 +1199,7 @@ static void econet_set_wait4idle(const char *dir, const char *reason)
 static void econet_tx_data(void)
 {
     if (ADLC.txfptr && EconetCycles >= EconetTxByteTrigger) {
-        EconetTxByteTrigger = EconetCycles + EconetTimeBetweenBytes;
+        EconetTxByteTrigger = EconetCycles + (confAUNmode ? 1 : EconetTimeBetweenBytes);
         log_debug("Econet(Tx): Write to FIFO noticed");
         bool TXlast = false;
         if (ADLC.txftl & powers[ADLC.txfptr - 1])
@@ -2310,7 +2323,14 @@ static void econet_rx_data(void)
              * previous one has been consumed (Response1 cleared, FSM back to IDLE).
              * A fallback delay of 50 polls guards against injecting before ANFS has
              * cleared its NMI dispatch vector ($0406/$0407); the inject gate below
-             * fires as soon as $0406/$0407 == 0000, so the fallback rarely triggers. */
+             * fires as soon as $0406/$0407 == 0000, so the fallback rarely triggers.
+             *
+             * (A stricter, mandatory-delay version of this gate was tried and
+             * made things worse: it didn't prevent the rare bad injection, it
+             * just delayed it -- and the delay itself was enough to blow past
+             * the ROM's own "no reply" patience, turning a rare race into a
+             * reliable failure. Reverted back to this original, which is
+             * right the overwhelming majority of the time.) */
             if (confAUNmode && EconetRespQLen > 0 && !EconetFakeResponsePending && fourwaystage == FWS_IDLE) {
                 struct econet_queued_resp *q = &EconetRespQ[EconetRespQHead];
                 memcpy(EconetFakeResponseBuff, q->buff, q->len);
@@ -2645,9 +2665,55 @@ static void econet_update_tail(void)
         }
     }
 
-    /* timeout four way handshake - for when we get lost.. */
+    /* timeout four way handshake - for when we get lost..
+     *
+     * Econet4Wtrigger is a *per-state* deadline, not a whole-transaction
+     * one: reset it whenever fourwaystage changes so each new state is
+     * judged against its own expectations rather than inheriting whatever
+     * was left over (often a much tighter budget) from an earlier state in
+     * the same transaction. Without this, a transaction that starts in a
+     * tightly-bounded state (e.g. FWS_SCOUTSENT, bounded by our own
+     * near-instant SCACKtrigger) locks in that short deadline for every
+     * later state it passes through too, including ones that have no such
+     * bound. */
+    static enum fourway last4Wstage = FWS_IDLE;
+    if (fourwaystage != last4Wstage) {
+        Econet4Wtrigger = 0;
+        last4Wstage = fourwaystage;
+    }
+
+    /* FWS_SCACKRCVD, FWS_SCOUTRCVD and FWS_DATARCVD are special: AUN elides
+     * the real scout exchange, so reaching these states means we (or a
+     * fake/injected scout) have just handed the local BBC something and
+     * are simply waiting for it to notice and respond -- no packet is
+     * outstanding on the wire for this hop, so there is no remote peer to
+     * have "gone lost", and no bound on how long the guest may legitimately
+     * take (e.g. reading the next block from a slow disc image):
+     *   - FWS_SCACKRCVD: guest was faked a scout ACK, we wait for it to Tx
+     *     the real data.
+     *   - FWS_SCOUTRCVD: guest was handed an (often fake/injected, e.g. a
+     *     PUT "send next block" continuation on the fixed ack port) scout,
+     *     we wait for it to Tx the ack.
+     *   - FWS_DATARCVD: guest was handed the data, we wait for it to Tx
+     *     the final ack.
+     * Don't arm the watchdog at all for these -- firing early doesn't just
+     * abandon the transfer cleanly, it resets fourwaystage to FWS_IDLE
+     * while the BBC still believes it's mid-handshake, so whatever it
+     * sends/does next gets misparsed or silently dropped, corrupting or
+     * stalling the transfer instead of just retrying it.
+     *
+     * FWS_DATASENT *is* waiting on a real remote peer (the ACK for data we
+     * actually put on the wire), so it still needs a "peer went missing"
+     * recovery timer -- but a bridge-connected FS's reply can legitimately
+     * take 20-30+ real seconds (see EconetWaitingForBridgeResp below), so
+     * give it the same generous ×10 budget rather than the tight default
+     * meant for a directly-connected AUN peer. */
     if (Econet4Wtrigger == 0) {
-        if (fourwaystage != FWS_IDLE)
+        if (fourwaystage == FWS_DATASENT)
+            Econet4Wtrigger = EconetCycles + FourWayStageTimeout * 10;
+        else if (fourwaystage != FWS_IDLE &&
+                 fourwaystage != FWS_SCACKRCVD && fourwaystage != FWS_SCOUTRCVD &&
+                 fourwaystage != FWS_DATARCVD)
             Econet4Wtrigger = EconetCycles + FourWayStageTimeout;
     }
     else if (Econet4Wtrigger <= EconetCycles) {
@@ -3104,10 +3170,25 @@ static void econet_write_txreg(uint8_t value, bool last)
         if (last)
             ADLC.txftl |= 1;
         /* Don't drain this byte until EconetTimeBetweenBytes cycles have passed.
-         * Prevents an immediate drain (when EconetTxByteTrigger==0) from causing
-         * a new TDRA interrupt before the NMI handler's RTI, which would nest NMIs
-         * and overflow the 6502 stack. */
-        EconetTxByteTrigger = EconetCycles + EconetTimeBetweenBytes;
+         * Prevents an immediate drain (when EconetTxByteTrigger==0 or already
+         * due) from causing a new TDRA interrupt before the NMI handler's RTI,
+         * which would nest NMIs and overflow the 6502 stack. Keep the full
+         * margin for that case, even in AUN mode -- it's the same hazard
+         * econet_tx_data()'s fast AUN re-arm doesn't have (that one only runs
+         * from the regular poll loop, never synchronously inside a register
+         * write mid-NMI-handler).
+         *
+         * But only *raise* the trigger if it isn't already armed for a still
+         * -pending future drain: in AUN mode econet_tx_data() re-arms it to
+         * fire on the very next poll tick after each drain, and the ROM's
+         * next byte write (from the TDRA interrupt that drain just caused)
+         * typically lands well within that tick. Unconditionally resetting
+         * it here on every write would clobber that fast pending drain back
+         * to the full wire-rate margin on almost every byte, defeating the
+         * AUN speedup in econet_tx_data() for a hazard that only exists when
+         * nothing was scheduled yet. */
+        if (EconetTxByteTrigger <= EconetCycles)
+            EconetTxByteTrigger = EconetCycles + EconetTimeBetweenBytes;
     } else {
         log_debug("ADLC: write TxData(%s)=%02X DROPPED (TX_RESET set) fws=%d s1=%02X s2=%02X", last ? "last" : "cont", value, fourwaystage, ADLC.status1, ADLC.status2);
     }
