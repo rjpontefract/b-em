@@ -175,7 +175,7 @@ bool tube_68000_init(void *rom)
     if (!mc68000_ram) {
         const char *sect = tubes[curtube].cfgsect;
         mc68000_ram_size = get_config_int(sect, "ramsize", MC68000_RAM_SIZE);
-        mc68000_ram = malloc(mc68000_ram_size);
+        mc68000_ram = calloc(1, mc68000_ram_size);
         if (!mc68000_ram) {
             log_error("mc68000: unable to allocate RAM: %s", strerror(errno));
             return false;
