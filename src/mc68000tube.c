@@ -38,7 +38,7 @@ static uint8_t readmem(uint32_t addr)
     else
     {
         uint8_t data = mc68000_ram[addr % mc68000_ram_size];
-        log_debug("mc68000: read %08X as RAM -> %02X", addr, data);
+        //log_debug("mc68000: read %08X as RAM -> %02X", addr, data);
         return data;
     }
     log_debug("mc68000: read %08X unmapped", addr);
@@ -97,7 +97,7 @@ static void writemem(uint32_t addr, uint8_t data)
   }
   else
   {
-    log_debug("mc68000: write %08X as RAM <- %02X", addr, data);
+    //log_debug("mc68000: write %08X as RAM <- %02X", addr, data);
     mc68000_ram[addr % mc68000_ram_size] = data;
   }
 }
