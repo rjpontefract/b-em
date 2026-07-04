@@ -18,7 +18,7 @@ static uint8_t readmem(uint32_t addr)
             rom_low = false;
             log_debug("mc68000: readmem paging out ROM");
         }
-        else if (addr < MC68000_ROM_SIZE) {
+        else {
             uint8_t data = mc68000_rom[addr & (MC68000_ROM_SIZE - 1)];
             //log_debug("mc68000: read %08X as low ROM -> %02X", addr, data);
             return data;
