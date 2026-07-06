@@ -61,7 +61,15 @@ static void log_common(const log_level_t *ll, unsigned dest, char *msg, size_t l
         fprintf(log_fp, "%s %s ", tmstr, ll->name);
         fwrite_unlocked(msg, len, 1, log_fp);
         putc_unlocked('\n', log_fp);
-        fflush_unlocked(log_fp);
+        /* 20260706 No longer flushing on every single line here -- with
+         * _DEBUG builds emitting 100,000+ log_debug() calls in a single
+         * emulated second during a bulk Econet transfer, a forced fflush()
+         * per line was measured causing real multi-second (in one capture,
+         * ~40s) I/O stalls of its own, on top of and confounding whatever
+         * genuine emulation timing issue we were trying to observe with it.
+         * log_close() below still fclose()s (and so flushes) on a clean
+         * exit, so nothing is lost unless the process is killed/crashes
+         * mid-session -- an acceptable tradeoff for a debug build. */
         funlockfile(log_fp);
     }
     if (dest & LOG_DEST_STDERR) {

@@ -498,6 +498,10 @@ static bool     EconetLastUnicastValid;
  * block arrives. */
 static unsigned long EconetFakeResponseInjectAfter = 0;
 
+/* Debounce for the "$0406/$0407 == 0" ready check below: counts consecutive
+ * polls (128 cycles apart) the vector has read as zero. See its use for why. */
+static int EconetVectorZeroCount = 0;
+
 /* Device and temp copy */
 
 volatile struct MC6854 ADLC;
@@ -845,6 +849,7 @@ void econet_reset(void)
     EconetTxByteTrigger = 0;
     EconetRespQHead = EconetRespQTail = EconetRespQLen = 0;
     EconetFakeResponseInjectAfter = 0;
+    EconetVectorZeroCount = 0;
     EconetFakeResponsePending = false;
     EconetFakeResponseActive = false;
     EconetFakeResponseSuppressAck = false;
@@ -2342,6 +2347,7 @@ static void econet_rx_data(void)
                 EconetFakeResponseHandle    = q->handle;
                 EconetFakeResponsePending   = true;
                 EconetFakeResponseInjectAfter = EconetCycles + 50;
+                EconetVectorZeroCount = 0;
                 EconetRespQHead = (EconetRespQHead + 1) % ECONET_RESPQ_DEPTH;
                 EconetRespQLen--;
                 log_debug("Econet(Rx): stn=%u: promoted from queue port=%02X len=%d inject after %lu (qlen now %d)",
@@ -2350,12 +2356,36 @@ static void econet_rx_data(void)
 
             /* Fake FS response: once WAIT4IDLE → FWS_IDLE, inject as soon as
              * $0406/$0407 == 0000 (ANFS NMI dispatch vector is idle) or the
-             * fallback timer expires, whichever comes first. */
+             * fallback timer expires, whichever comes first.
+             *
+             * 20260706 The zero-vector check is now debounced -- it must read
+             * zero on 3 consecutive polls (~384 cycles / ~192us at nominal
+             * 2MHz, negligible) rather than being trusted on a single sample.
+             * A momentary zero read (e.g. mid-way through an unrelated
+             * multi-byte ROM update to that vector) can otherwise look like
+             * "ANFS is ready" when it isn't, so the fake scout gets injected
+             * while ANFS genuinely isn't watching for it and silently never
+             * responds -- indistinguishable from "the guest is just slow"
+             * until the ×40 backstop above times out, except this is a real
+             * (if rare) race rather than legitimate processing time, and with
+             * enough repeated chunks in a big transfer the odds catch up.
+             * This is a tiny, near-free debounce, deliberately not the much
+             * longer mandatory delay tried and reverted elsewhere in this
+             * function for eating into the ROM's own "no reply" patience
+             * budget instead of fixing the underlying race. The fallback
+             * timer path is untouched and still fires unconditionally. */
+            if (confAUNmode && EconetFakeResponsePending && fourwaystage == FWS_IDLE) {
+                if (readmem(0x0406) == 0 && readmem(0x0407) == 0)
+                    EconetVectorZeroCount++;
+                else
+                    EconetVectorZeroCount = 0;
+            }
             if (confAUNmode && EconetFakeResponsePending && fourwaystage == FWS_IDLE
                 && (!EconetFakeResponseInjectAfter || EconetFakeResponseInjectAfter <= EconetCycles
-                    || (readmem(0x0406) == 0 && readmem(0x0407) == 0))) {
+                    || EconetVectorZeroCount >= 3)) {
                 EconetFakeResponsePending = false;
                 EconetFakeResponseInjectAfter = 0;
+                EconetVectorZeroCount = 0;
                 log_debug("Econet(Rx): stn=%u: injecting queued FS response scout port=%02X from stn=%u $0406/$0407=%04X fws->SCOUTRCVD",
                     EconetStationNumber, EconetFakeResponseReplyPort, EconetFakeResponseSrcStn,
                     (uint16_t)(readmem(0x0406) | (readmem(0x0407) << 8)));
@@ -2688,7 +2718,9 @@ static void econet_update_tail(void)
      * are simply waiting for it to notice and respond -- no packet is
      * outstanding on the wire for this hop, so there is no remote peer to
      * have "gone lost", and no bound on how long the guest may legitimately
-     * take (e.g. reading the next block from a slow disc image):
+     * take (e.g. reading the next block from a slow disc image, or -- on a
+     * Tube machine -- the host relaying a big block across to the parasite
+     * one byte at a time before it can get back to acking the next scout):
      *   - FWS_SCACKRCVD: guest was faked a scout ACK, we wait for it to Tx
      *     the real data.
      *   - FWS_SCOUTRCVD: guest was handed an (often fake/injected, e.g. a
@@ -2696,11 +2728,33 @@ static void econet_update_tail(void)
      *     we wait for it to Tx the ack.
      *   - FWS_DATARCVD: guest was handed the data, we wait for it to Tx
      *     the final ack.
-     * Don't arm the watchdog at all for these -- firing early doesn't just
-     * abandon the transfer cleanly, it resets fourwaystage to FWS_IDLE
-     * while the BBC still believes it's mid-handshake, so whatever it
-     * sends/does next gets misparsed or silently dropped, corrupting or
-     * stalling the transfer instead of just retrying it.
+     * A short, tightly-bounded timeout here is actively wrong: firing early
+     * doesn't just abandon the transfer cleanly, it resets fourwaystage to
+     * FWS_IDLE while the BBC still believes it's mid-handshake, so whatever
+     * it sends/does next gets misparsed or silently dropped, corrupting or
+     * stalling the transfer instead of just retrying it. That was the
+     * reasoning for arming no watchdog at all here.
+     *
+     * 20260706 But no watchdog at all is its own bug: real-hardware testing
+     * (Pi 4B + real BBC/Master, and separately a Tube/68000 CiscOS BASIC
+     * load over AUN) caught the guest's own MOS-level Econet client giving
+     * up on its own (printing "No reply") after ~24 real seconds stuck in
+     * FWS_SCOUTRCVD, while fourwaystage stayed parked there forever -- the
+     * guest moved on, but we never did. Since recvfrom() is only ever
+     * called (in econet_rx_data()) when fourwaystage is IDLE/IMMSENT/
+     * DATASENT/WAIT4IDLE, every subsequent Econet operation then silently
+     * hung too, with no recovery short of a full BREAK (which reaches
+     * econet_reset() and forces fourwaystage back to FWS_IDLE).
+     *
+     * Fix: arm a *backstop* here too, but set it far longer than any
+     * legitimate guest processing should ever take -- long enough that by
+     * the time it fires, the guest's own (apparently shorter) patience has
+     * already run out and it has already abandoned the transaction itself,
+     * so there is no still-in-progress legitimate transfer left to corrupt.
+     * ×40 (~40 real seconds at nominal 2MHz/128-cycles-per-poll) comfortably
+     * exceeds both the one measured real stall (~24s) and the existing
+     * 20-30+s precedent for bridge-connected FS replies below, while still
+     * eventually self-healing a genuine deadlock instead of requiring BREAK.
      *
      * FWS_DATASENT *is* waiting on a real remote peer (the ACK for data we
      * actually put on the wire), so it still needs a "peer went missing"
@@ -2711,9 +2765,10 @@ static void econet_update_tail(void)
     if (Econet4Wtrigger == 0) {
         if (fourwaystage == FWS_DATASENT)
             Econet4Wtrigger = EconetCycles + FourWayStageTimeout * 10;
-        else if (fourwaystage != FWS_IDLE &&
-                 fourwaystage != FWS_SCACKRCVD && fourwaystage != FWS_SCOUTRCVD &&
-                 fourwaystage != FWS_DATARCVD)
+        else if (fourwaystage == FWS_SCACKRCVD || fourwaystage == FWS_SCOUTRCVD ||
+                 fourwaystage == FWS_DATARCVD)
+            Econet4Wtrigger = EconetCycles + FourWayStageTimeout * 40;
+        else if (fourwaystage != FWS_IDLE)
             Econet4Wtrigger = EconetCycles + FourWayStageTimeout;
     }
     else if (Econet4Wtrigger <= EconetCycles) {
@@ -2724,6 +2779,7 @@ static void econet_update_tail(void)
         EconetFakeResponseActive = false;
         EconetRespQHead = EconetRespQTail = EconetRespQLen = 0;
         EconetFakeResponseInjectAfter = 0;
+        EconetVectorZeroCount = 0;
         EconetWaitingForBridgeResp = false;
         Econet4Wtrigger = 0;
         fourwaystage = FWS_IDLE;
