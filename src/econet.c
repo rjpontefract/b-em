@@ -437,9 +437,25 @@ static uint8_t       EconetFakeImmReplySrcNet;
  * during a LOAD).  We hold up to ECONET_RESPQ_DEPTH blocks in a circular
  * queue and promote them one at a time into the active Response1 slot.
  * The buffer is sized to hold a full 1024-byte AUN payload so no data is
- * silently truncated. */
+ * silently truncated.
+ *
+ * 20260707 Depth 8 turned out to be nowhere near enough: the bridge's own
+ * server-side network stack ACKs (and the bridge dequeues/sends the next
+ * block on) each packet as soon as it's *received* at the network level,
+ * completely independent of how fast b-em's emulated 6502/DNFS actually
+ * drains this queue -- confirmed via a live bridge-side journalctl capture
+ * showing an entire ~29-chunk large-file transfer enqueued and fully
+ * acked in well under 100ms of wall-clock time, versus the real (2MHz-
+ * emulated, NMI-serviced) guest needing far longer per chunk. Once this
+ * queue filled, every further packet -- including, in one capture, the
+ * final completion packet itself -- was silently dropped right here, which
+ * is what every single "No reply" this whole investigation chased was
+ * actually caused by (the guest was correctly waiting for data that had
+ * already been lost, not stuck on any DNFS/ROM-side race). Raised well
+ * past any realistic single-transfer burst size; each entry is at most
+ * ECONET_RESP_BUFF_MAX bytes, so even this is a trivial ~1MB. */
 #define ECONET_RESP_BUFF_MAX  4096
-#define ECONET_RESPQ_DEPTH    8
+#define ECONET_RESPQ_DEPTH    256
 
 struct econet_queued_resp {
     uint8_t  buff[ECONET_RESP_BUFF_MAX];
@@ -501,6 +517,12 @@ static unsigned long EconetFakeResponseInjectAfter = 0;
 /* Debounce for the "$0406/$0407 == 0" ready check below: counts consecutive
  * polls (128 cycles apart) the vector has read as zero. See its use for why. */
 static int EconetVectorZeroCount = 0;
+
+/* 20260707 Tracking for the RTS-blocking diagnostic in econet_rx_data() -
+ * how many consecutive polls RTS has been seen asserted, and whether it
+ * was already asserted last poll (so we know when a fresh episode starts). */
+static int EconetRtsPollCount = 0;
+static bool EconetRtsWasAsserted = false;
 
 /* Device and temp copy */
 
@@ -1571,10 +1593,26 @@ static void econet_rx_data(void)
             fourwaystage, ADLC.control1, ADLC.control2);
     }
     if (ADLC.control2 & ADLC_CTL2_RTS) {
-        static int rts_count = 0;
-        if (rts_count++ == 0)
-            log_debug("Econet(Rx): RTS asserted, blocking RX fws=%d ctl1=%02X ctl2=%02X", fourwaystage, ADLC.control1, ADLC.control2);
+        /* 20260707 Was "static int rts_count=0; if (rts_count++==0)" -- logged
+         * only once for the *entire process lifetime*, so a second, later
+         * occurrence of RTS sticking (e.g. during a different, much longer
+         * stall) would be silently suppressed, giving no way to confirm or
+         * rule this out as the cause from the log alone. Now logs once when
+         * newly asserted, then again every ~1 real second (15625 polls) for
+         * as long as it stays stuck, so a long stall shows up as a repeating,
+         * unmistakable trail rather than nothing at all after the first.
+         * EconetRtsPollCount/EconetRtsWasAsserted reset below once RTS clears,
+         * so the *next* episode also starts with an immediate log rather than
+         * inheriting a stale count/phase from this one. */
+        if (!EconetRtsWasAsserted || (EconetRtsPollCount % 15625) == 0)
+            log_debug("Econet(Rx): RTS asserted, blocking RX fws=%d ctl1=%02X ctl2=%02X (stuck for %d polls)", fourwaystage, ADLC.control1, ADLC.control2, EconetRtsPollCount);
+        EconetRtsWasAsserted = true;
+        EconetRtsPollCount++;
         return;
+    }
+    else {
+        EconetRtsWasAsserted = false;
+        EconetRtsPollCount = 0;
     }
     if (rxdelay >= 0) {
         if (rxdelay == 0) {
